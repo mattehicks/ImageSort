@@ -45,7 +45,7 @@ The app comes with a default configuration that you can modify:
    - Customize the folder name and path for each shortcut
 
 Default configuration:
-- **Source**: `C:\Users\matte\Documents\D20 Images`
+- **Source**: `C:\Users\<user>\Documents\Pictures`
 - **1**: instagram folder
 - **2**: maybe folder
 - **3**: discard folder
