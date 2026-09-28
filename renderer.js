@@ -14,15 +14,85 @@ const noImageMsg = document.getElementById('no-image-msg');
 const shortcutKeysEl = document.getElementById('shortcut-keys');
 const shortcutsPanel = document.getElementById('shortcuts');
 const quickFolderPanel = document.getElementById('quick-folder-panel');
+const sortSelect = document.getElementById('sort-select');
+const sortDirBtn = document.getElementById('sort-dir-btn');
+
+let sortBy = 'name';
+let sortOrder = 'asc';
 
 // Initialize
 async function init() {
     config = await ipcRenderer.invoke('load-config');
     if (config) {
+        if (config.sortBy) sortBy = config.sortBy;
+        if (config.sortOrder) sortOrder = config.sortOrder;
+        updateSortControls();
         await loadImages();
         updateShortcutDisplay();
     }
 }
+
+// Sorting
+const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function compareImages(a, b) {
+    let result;
+    switch (sortBy) {
+        case 'mtime':
+        case 'birthtime':
+        case 'size':
+            result = a[sortBy] - b[sortBy];
+            break;
+        case 'ext':
+            result = nameCollator.compare(a.ext, b.ext);
+            break;
+        case 'name':
+        default:
+            result = 0;
+    }
+    // Tie-break (and default) by name
+    if (result === 0) result = nameCollator.compare(a.name, b.name);
+    return sortOrder === 'desc' ? -result : result;
+}
+
+function sortImages(keepCurrent) {
+    const currentPath = keepCurrent && images[currentIndex] ? images[currentIndex].path : null;
+    images.sort(compareImages);
+    if (currentPath) {
+        const idx = images.findIndex(img => img.path === currentPath);
+        currentIndex = idx >= 0 ? idx : 0;
+    }
+}
+
+function updateSortControls() {
+    sortSelect.value = sortBy;
+    sortDirBtn.textContent = sortOrder === 'asc' ? '↑ Asc' : '↓ Desc';
+}
+
+async function applySort() {
+    updateSortControls();
+    if (images.length > 0) {
+        sortImages(true);
+        displayImage();
+    }
+    if (config) {
+        config.sortBy = sortBy;
+        config.sortOrder = sortOrder;
+        await ipcRenderer.invoke('save-config', config);
+    }
+}
+
+sortSelect.addEventListener('change', () => {
+    sortBy = sortSelect.value;
+    sortSelect.blur(); // return arrow keys to image navigation
+    applySort();
+});
+
+sortDirBtn.addEventListener('click', () => {
+    sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    sortDirBtn.blur();
+    applySort();
+});
 
 async function loadImages() {
     if (!config || !config.sourceFolder) {
@@ -33,6 +103,7 @@ async function loadImages() {
     images = await ipcRenderer.invoke('load-images', config.sourceFolder);
     
     if (images.length > 0) {
+        sortImages(false);
         currentIndex = 0;
         displayImage();
         hideNoImages();
@@ -47,10 +118,10 @@ function displayImage() {
         return;
     }
 
-    const imagePath = images[currentIndex];
+    const imagePath = images[currentIndex].path;
     imageEl.src = imagePath;
     imageCounterEl.textContent = `${currentIndex + 1} / ${images.length}`;
-    filenameEl.textContent = path.basename(imagePath);
+    filenameEl.textContent = images[currentIndex].name;
     hideNoImages();
 }
 
@@ -84,12 +155,10 @@ async function moveToFolder(destKey) {
     const destination = config.destinationFolders[destKey];
     if (!destination) return;
 
-    const currentImage = images[currentIndex];
+    const currentImage = images[currentIndex].path;
     const result = await ipcRenderer.invoke('move-file', currentImage, destination.path);
     
     if (result.success) {
-        showStatus(`Moved to ${destination.name}`);
-        
         // Remove from current list
         images.splice(currentIndex, 1);
         
@@ -103,19 +172,17 @@ async function moveToFolder(destKey) {
             displayImage();
         }
     } else {
-        showStatus(`Error: ${result.error}`, true);
+        console.error(result.error);
     }
 }
 
 async function deleteCurrentImage() {
     if (images.length === 0) return;
     
-    const currentImage = images[currentIndex];
+    const currentImage = images[currentIndex].path;
     const result = await ipcRenderer.invoke('delete-file', currentImage);
     
     if (result.success) {
-        showStatus('Deleted (moved to recycle bin)');
-        
         // Remove from current list
         images.splice(currentIndex, 1);
         
@@ -129,19 +196,8 @@ async function deleteCurrentImage() {
             displayImage();
         }
     } else {
-        showStatus(`Error: ${result.error}`, true);
+        console.error(result.error);
     }
-}
-
-function showStatus(message, isError = false) {
-    const statusEl = document.getElementById('status');
-    statusEl.textContent = message;
-    statusEl.style.display = 'block';
-    statusEl.style.background = isError ? 'rgba(156, 14, 14, 0.95)' : 'rgba(14, 99, 156, 0.95)';
-    
-    setTimeout(() => {
-        statusEl.style.display = 'none';
-    }, 2000);
 }
 
 function updateShortcutDisplay() {
@@ -164,6 +220,8 @@ function updateShortcutDisplay() {
 document.addEventListener('keydown', (e) => {
     // Don't handle keys if config panel is open
     if (configPanel.classList.contains('active')) return;
+    // Don't handle keys while a form control (e.g. sort dropdown) has focus
+    if (['SELECT', 'INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
     if (e.key === 'ArrowRight') {
         nextImage();
@@ -188,7 +246,6 @@ document.getElementById('open-folder-btn').addEventListener('click', async () =>
         config.sourceFolder = folder;
         await ipcRenderer.invoke('save-config', config);
         await loadImages();
-        showStatus('Source folder updated');
     }
 });
 
@@ -205,7 +262,6 @@ document.getElementById('save-config').addEventListener('click', async () => {
 
 document.getElementById('reload-btn').addEventListener('click', async () => {
     await loadImages();
-    showStatus('Images reloaded');
 });
 
 document.getElementById('shortcuts-close').addEventListener('click', () => {
@@ -306,7 +362,9 @@ function openConfigPanel() {
 async function saveConfig() {
     const newConfig = {
         sourceFolder: document.getElementById('source-folder').value,
-        destinationFolders: {}
+        destinationFolders: {},
+        sortBy: sortBy,
+        sortOrder: sortOrder
     };
     
     document.querySelectorAll('.dest-key').forEach(input => {
@@ -325,9 +383,8 @@ async function saveConfig() {
     const result = await ipcRenderer.invoke('save-config', newConfig);
     if (result.success) {
         config = newConfig;
-        showStatus('Settings saved');
     } else {
-        showStatus('Error saving settings', true);
+        console.error('Error saving settings:', result.error);
     }
 }
 

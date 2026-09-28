@@ -53,6 +53,29 @@
             background: #0d5a8f;
         }
 
+        #sort-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 10px;
+            font-size: 14px;
+            color: #cccccc;
+        }
+
+        #sort-select {
+            background: #1e1e1e;
+            color: #ffffff;
+            border: 1px solid #3e3e3e;
+            border-radius: 4px;
+            padding: 7px 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        #sort-dir-btn {
+            min-width: 72px;
+        }
+
         #info {
             font-size: 14px;
             color: #cccccc;
@@ -279,24 +302,6 @@
             text-align: center;
             color: #888;
         }
-
-        #status {
-            position: fixed;
-            top: 60px;
-            right: 20px;
-            background: rgba(14, 99, 156, 0.95);
-            padding: 10px 20px;
-            border-radius: 4px;
-            display: none;
-            animation: fadeInOut 2s forwards;
-        }
-
-        @keyframes fadeInOut {
-            0% { opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { opacity: 0; }
-        }
     </style>
 </head>
 <body>
@@ -305,6 +310,17 @@
             <button id="open-folder-btn">📁 Open Folder</button>
             <button id="reload-btn">↻ Reload</button>
             <button id="toggle-shortcuts-btn">? Shortcuts</button>
+            <div id="sort-controls">
+                <label for="sort-select">Sort:</label>
+                <select id="sort-select">
+                    <option value="name">Name</option>
+                    <option value="mtime">Date modified</option>
+                    <option value="birthtime">Date created</option>
+                    <option value="size">Size</option>
+                    <option value="ext">Type</option>
+                </select>
+                <button id="sort-dir-btn" title="Toggle ascending/descending">↑ Asc</button>
+            </div>
         </div>
         <div id="info">
             <span id="image-counter">0 / 0</span>
@@ -378,8 +394,6 @@
             </div>
         </div>
     </div>
-
-    <div id="status"></div>
 
     <script src="renderer.js"></script>
 </body>
