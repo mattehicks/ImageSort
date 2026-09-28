@@ -76,6 +76,12 @@
             min-width: 72px;
         }
 
+        #sort-dir-btn:disabled {
+            background: #3e3e3e;
+            color: #888;
+            cursor: default;
+        }
+
         #info {
             font-size: 14px;
             color: #cccccc;
@@ -318,6 +324,7 @@
                     <option value="birthtime">Date created</option>
                     <option value="size">Size</option>
                     <option value="ext">Type</option>
+                    <option value="random">Random</option>
                 </select>
                 <button id="sort-dir-btn" title="Toggle ascending/descending">↑ Asc</button>
             </div>

@@ -241,34 +241,68 @@ ipcMain.handle('save-config', async (event, config) => {
   }
 });
 
-ipcMain.handle('load-images', async (event, folderPath) => {
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
+
+function normPath(p) {
+  return path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+// Collect image files in dir; when recursive, descend into subfolders,
+// skipping symlinks/junctions and any folder listed in excludeSet.
+async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
+  let entries;
   try {
-    const files = await fs.readdir(folderPath);
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
-    
-    const imageNames = files.filter(file => {
-      const ext = path.extname(file).toLowerCase();
-      return imageExtensions.includes(ext);
-    });
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (err) {
+    return; // unreadable folder: skip
+  }
 
-    const imageFiles = await Promise.all(imageNames.map(async file => {
-      const fullPath = path.join(folderPath, file);
-      try {
-        const stat = await fs.stat(fullPath);
-        return {
-          path: fullPath,
-          name: file,
-          ext: path.extname(file).toLowerCase(),
-          mtime: stat.mtimeMs,
-          birthtime: stat.birthtimeMs,
-          size: stat.size
-        };
-      } catch (err) {
-        return null;
-      }
-    }));
+  const subdirs = [];
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    const isImage = IMAGE_EXTENSIONS.includes(path.extname(entry.name).toLowerCase());
+    if (entry.isSymbolicLink()) {
+      if (isImage) files.push(fullPath); // linked folders are never followed
+      continue;
+    }
+    if (entry.isDirectory()) {
+      if (recursive && !excludeSet.has(normPath(fullPath))) subdirs.push(fullPath);
+    } else if (entry.isFile() && isImage) {
+      files.push(fullPath);
+    }
+  }
 
-    return imageFiles.filter(Boolean);
+  const stats = await Promise.all(files.map(async fullPath => {
+    try {
+      const stat = await fs.stat(fullPath);
+      const name = path.basename(fullPath);
+      return {
+        path: fullPath,
+        name: name,
+        relPath: path.relative(rootPath, fullPath),
+        ext: path.extname(name).toLowerCase(),
+        mtime: stat.mtimeMs,
+        birthtime: stat.birthtimeMs,
+        size: stat.size
+      };
+    } catch (err) {
+      return null;
+    }
+  }));
+  for (const s of stats) if (s) out.push(s);
+
+  for (const sub of subdirs) {
+    await collectImages(rootPath, sub, recursive, excludeSet, out);
+  }
+}
+
+ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, excludeFolders) => {
+  try {
+    const excludeSet = new Set((excludeFolders || []).filter(Boolean).map(normPath));
+    const out = [];
+    await collectImages(folderPath, folderPath, !!includeSubfolders, excludeSet, out);
+    return out;
   } catch (error) {
     console.error('Error loading images:', error);
     return [];
@@ -299,6 +333,26 @@ ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
     console.error('Error moving file:', error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('select-source-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+
+  const folder = result.filePaths[0];
+  const answer = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: 'Include subfolders?',
+    message: 'Include images from subfolders?',
+    detail: folder,
+    buttons: ['This folder only', 'Include subfolders'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  });
+  return { folder, includeSubfolders: answer.response === 1 };
 });
 
 ipcMain.handle('select-folder', async () => {

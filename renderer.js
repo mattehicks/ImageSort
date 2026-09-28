@@ -50,14 +50,26 @@ function compareImages(a, b) {
         default:
             result = 0;
     }
-    // Tie-break (and default) by name
-    if (result === 0) result = nameCollator.compare(a.name, b.name);
+    // Tie-break (and default) by relative path, so subfolders group together
+    if (result === 0) result = nameCollator.compare(a.relPath || a.name, b.relPath || b.name);
     return sortOrder === 'desc' ? -result : result;
+}
+
+function shuffleImages() {
+    // Fisher-Yates
+    for (let i = images.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [images[i], images[j]] = [images[j], images[i]];
+    }
 }
 
 function sortImages(keepCurrent) {
     const currentPath = keepCurrent && images[currentIndex] ? images[currentIndex].path : null;
-    images.sort(compareImages);
+    if (sortBy === 'random') {
+        shuffleImages();
+    } else {
+        images.sort(compareImages);
+    }
     if (currentPath) {
         const idx = images.findIndex(img => img.path === currentPath);
         currentIndex = idx >= 0 ? idx : 0;
@@ -67,6 +79,7 @@ function sortImages(keepCurrent) {
 function updateSortControls() {
     sortSelect.value = sortBy;
     sortDirBtn.textContent = sortOrder === 'asc' ? '↑ Asc' : '↓ Desc';
+    sortDirBtn.disabled = sortBy === 'random';
 }
 
 async function applySort() {
@@ -100,7 +113,8 @@ async function loadImages() {
         return;
     }
 
-    images = await ipcRenderer.invoke('load-images', config.sourceFolder);
+    const excludeFolders = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
+    images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, excludeFolders);
     
     if (images.length > 0) {
         sortImages(false);
@@ -121,7 +135,7 @@ function displayImage() {
     const imagePath = images[currentIndex].path;
     imageEl.src = imagePath;
     imageCounterEl.textContent = `${currentIndex + 1} / ${images.length}`;
-    filenameEl.textContent = images[currentIndex].name;
+    filenameEl.textContent = images[currentIndex].relPath || images[currentIndex].name;
     hideNoImages();
 }
 
@@ -241,9 +255,10 @@ document.addEventListener('keydown', (e) => {
 
 // Open folder handler
 document.getElementById('open-folder-btn').addEventListener('click', async () => {
-    const folder = await ipcRenderer.invoke('select-folder');
-    if (folder) {
-        config.sourceFolder = folder;
+    const selection = await ipcRenderer.invoke('select-source-folder');
+    if (selection) {
+        config.sourceFolder = selection.folder;
+        config.includeSubfolders = selection.includeSubfolders;
         await ipcRenderer.invoke('save-config', config);
         await loadImages();
     }
@@ -362,6 +377,7 @@ function openConfigPanel() {
 async function saveConfig() {
     const newConfig = {
         sourceFolder: document.getElementById('source-folder').value,
+        includeSubfolders: !!(config && config.includeSubfolders),
         destinationFolders: {},
         sortBy: sortBy,
         sortOrder: sortOrder
