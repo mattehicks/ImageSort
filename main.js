@@ -343,16 +343,18 @@ ipcMain.handle('select-source-folder', async () => {
 
   const folder = result.filePaths[0];
   const answer = await dialog.showMessageBox(mainWindow, {
-    type: 'question',
-    title: 'Include subfolders?',
-    message: 'Include images from subfolders?',
-    detail: folder,
-    buttons: ['This folder only', 'Include subfolders'],
+    type: 'none',
+    title: 'Open Folder',
+    message: folder,
+    checkboxLabel: 'Include subfolders',
+    checkboxChecked: false,
+    buttons: ['OK', 'Cancel'],
     defaultId: 0,
-    cancelId: 0,
+    cancelId: 1,
     noLink: true
   });
-  return { folder, includeSubfolders: answer.response === 1 };
+  if (answer.response !== 0) return null;
+  return { folder, includeSubfolders: answer.checkboxChecked };
 });
 
 ipcMain.handle('select-folder', async () => {
