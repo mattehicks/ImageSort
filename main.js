@@ -8,7 +8,7 @@ const { execFile } = require('child_process');
 let mainWindow;
 
 // Config is stored in the registry under HKCU\Software\D20 Image Viewer:
-//   SortBy, SortOrder                            (REG_SZ)
+//   SortBy, SortOrder, AutoMoveSkipped ("1"/"0") (REG_SZ)
 //   Destinations\<id>\Name, Path, Key            (REG_SZ)
 // The source folder is NOT persisted; the app starts with no folder loaded.
 // Reads use `reg export` and writes use `reg import` with UTF-16 .reg data,
@@ -29,8 +29,11 @@ const DEFAULT_CONFIG = {
     '3': { name: '', path: '', key: '3' }
   },
   sortBy: 'name',
-  sortOrder: 'asc'
+  sortOrder: 'asc',
+  autoMoveSkipped: false
 };
+
+const SKIPPED_FOLDER_NAME = 'skipped';
 
 async function readJson(filePath) {
   const data = await fs.readFile(filePath, 'utf8');
@@ -92,6 +95,7 @@ async function readRegistryConfig(regKey = REG_KEY) {
       sourceFolder: root.values.SourceFolder || '',
       sortBy: root.values.SortBy || DEFAULT_CONFIG.sortBy,
       sortOrder: root.values.SortOrder || DEFAULT_CONFIG.sortOrder,
+      autoMoveSkipped: root.values.AutoMoveSkipped === '1',
       destinationFolders: {}
     };
 
@@ -124,6 +128,7 @@ async function writeRegistryConfig(config) {
     `[${REG_KEY}]`,
     `"SortBy"="${regEscape(config.sortBy || DEFAULT_CONFIG.sortBy)}"`,
     `"SortOrder"="${regEscape(config.sortOrder || DEFAULT_CONFIG.sortOrder)}"`,
+    `"AutoMoveSkipped"="${config.autoMoveSkipped ? '1' : '0'}"`,
     ''
   ];
   for (const [id, dest] of Object.entries(config.destinationFolders || {})) {
@@ -300,12 +305,35 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
 ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, excludeFolders) => {
   try {
     const excludeSet = new Set((excludeFolders || []).filter(Boolean).map(normPath));
+    excludeSet.add(normPath(path.join(folderPath, SKIPPED_FOLDER_NAME)));
     const out = [];
     await collectImages(folderPath, folderPath, !!includeSubfolders, excludeSet, out);
     return out;
   } catch (error) {
     console.error('Error loading images:', error);
     return [];
+  }
+});
+
+// Move a viewed-but-unsorted image to <rootFolder>\skipped.
+// Never overwrites: a name clash gets " (1)", " (2)", ... appended.
+ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder) => {
+  try {
+    const destFolder = path.join(rootFolder, SKIPPED_FOLDER_NAME);
+    await fs.mkdir(destFolder, { recursive: true });
+
+    const ext = path.extname(sourcePath);
+    const base = path.basename(sourcePath, ext);
+    let destPath = path.join(destFolder, base + ext);
+    for (let n = 1; fsSync.existsSync(destPath); n++) {
+      destPath = path.join(destFolder, `${base} (${n})${ext}`);
+    }
+
+    await fs.rename(sourcePath, destPath);
+    return { success: true, newPath: destPath };
+  } catch (error) {
+    console.error('Error moving to skipped:', error);
+    return { success: false, error: error.message };
   }
 });
 

@@ -82,6 +82,21 @@
             cursor: default;
         }
 
+        #auto-move-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #cccccc;
+            cursor: pointer;
+            margin-left: 10px;
+            user-select: none;
+        }
+
+        #auto-move-skipped {
+            cursor: pointer;
+        }
+
         #info {
             font-size: 14px;
             color: #cccccc;
@@ -328,6 +343,10 @@
                 </select>
                 <button id="sort-dir-btn" title="Toggle ascending/descending">↑ Asc</button>
             </div>
+            <label id="auto-move-label" title="When you move off an image without sorting it (1/2/3) or deleting it (X), move it to a 'skipped' folder inside the opened folder">
+                <input type="checkbox" id="auto-move-skipped">
+                Auto-move skipped
+            </label>
         </div>
         <div id="info">
             <span id="image-counter">0 / 0</span>

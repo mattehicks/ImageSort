@@ -16,6 +16,7 @@ const shortcutsPanel = document.getElementById('shortcuts');
 const quickFolderPanel = document.getElementById('quick-folder-panel');
 const sortSelect = document.getElementById('sort-select');
 const sortDirBtn = document.getElementById('sort-dir-btn');
+const autoMoveCheckbox = document.getElementById('auto-move-skipped');
 
 let sortBy = 'name';
 let sortOrder = 'asc';
@@ -26,11 +27,19 @@ async function init() {
     if (config) {
         if (config.sortBy) sortBy = config.sortBy;
         if (config.sortOrder) sortOrder = config.sortOrder;
+        autoMoveCheckbox.checked = !!config.autoMoveSkipped;
         updateSortControls();
         await loadImages();
         updateShortcutDisplay();
     }
 }
+
+autoMoveCheckbox.addEventListener('change', async () => {
+    autoMoveCheckbox.blur(); // return arrow keys to image navigation
+    if (!config) return;
+    config.autoMoveSkipped = autoMoveCheckbox.checked;
+    await ipcRenderer.invoke('save-config', config);
+});
 
 // Sorting
 const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -151,26 +160,60 @@ function hideNoImages() {
     noImageMsg.style.display = 'none';
 }
 
-function nextImage() {
-    if (images.length === 0) return;
-    currentIndex = (currentIndex + 1) % images.length;
+// Serializes file operations so fast key presses can't act on the wrong image
+let busy = false;
+
+// Navigate by step (+1 / -1). With auto-move on, the image being left
+// (viewed but not moved/deleted with a key) goes to <source>\skipped.
+async function navigate(step) {
+    if (images.length === 0 || busy) return;
+
+    if (config && config.autoMoveSkipped && config.sourceFolder) {
+        busy = true;
+        try {
+            const result = await ipcRenderer.invoke('move-to-skipped', images[currentIndex].path, config.sourceFolder);
+            if (result.success) {
+                images.splice(currentIndex, 1);
+                if (images.length === 0) {
+                    showNoImages();
+                    return;
+                }
+                if (step > 0) {
+                    // next image has shifted into currentIndex
+                    if (currentIndex >= images.length) currentIndex = 0;
+                } else {
+                    currentIndex = (currentIndex - 1 + images.length) % images.length;
+                }
+                displayImage();
+                return;
+            }
+            console.error(result.error); // move failed: fall through to plain navigation
+        } finally {
+            busy = false;
+        }
+    }
+
+    currentIndex = (currentIndex + step + images.length) % images.length;
     displayImage();
+}
+
+function nextImage() {
+    return navigate(1);
 }
 
 function previousImage() {
-    if (images.length === 0) return;
-    currentIndex = (currentIndex - 1 + images.length) % images.length;
-    displayImage();
+    return navigate(-1);
 }
 
 async function moveToFolder(destKey) {
-    if (images.length === 0) return;
+    if (images.length === 0 || busy) return;
     
     const destination = config.destinationFolders[destKey];
     if (!destination) return;
 
+    busy = true;
     const currentImage = images[currentIndex].path;
-    const result = await ipcRenderer.invoke('move-file', currentImage, destination.path);
+    const result = await ipcRenderer.invoke('move-file', currentImage, destination.path).finally(() => { busy = false; });
     
     if (result.success) {
         // Remove from current list
@@ -191,10 +234,11 @@ async function moveToFolder(destKey) {
 }
 
 async function deleteCurrentImage() {
-    if (images.length === 0) return;
+    if (images.length === 0 || busy) return;
     
+    busy = true;
     const currentImage = images[currentIndex].path;
-    const result = await ipcRenderer.invoke('delete-file', currentImage);
+    const result = await ipcRenderer.invoke('delete-file', currentImage).finally(() => { busy = false; });
     
     if (result.success) {
         // Remove from current list
@@ -237,10 +281,10 @@ document.addEventListener('keydown', (e) => {
     // Don't handle keys while a form control (e.g. sort dropdown) has focus
     if (['SELECT', 'INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
-    if (e.key === 'ArrowRight') {
-        nextImage();
-    } else if (e.key === 'ArrowLeft') {
-        previousImage();
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        // With auto-move on, a held-down arrow key must not sweep images into skipped
+        if (e.repeat && config && config.autoMoveSkipped) return;
+        if (e.key === 'ArrowRight') nextImage(); else previousImage();
     } else if (e.key === 'x' || e.key === 'X') {
         deleteCurrentImage();
     } else if (config && config.destinationFolders) {
@@ -378,6 +422,7 @@ async function saveConfig() {
     const newConfig = {
         sourceFolder: document.getElementById('source-folder').value,
         includeSubfolders: !!(config && config.includeSubfolders),
+        autoMoveSkipped: !!(config && config.autoMoveSkipped),
         destinationFolders: {},
         sortBy: sortBy,
         sortOrder: sortOrder
