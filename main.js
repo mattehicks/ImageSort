@@ -272,6 +272,9 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
       continue;
     }
     if (entry.isDirectory()) {
+      // Any folder named "skipped" is left out of the scan. The opened folder
+      // itself is never excluded, so picking a skipped folder directly loads it.
+      if (entry.name.toLowerCase() === SKIPPED_FOLDER_NAME) continue;
       if (recursive && !excludeSet.has(normPath(fullPath))) subdirs.push(fullPath);
     } else if (entry.isFile() && isImage) {
       files.push(fullPath);
@@ -305,7 +308,6 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
 ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, excludeFolders) => {
   try {
     const excludeSet = new Set((excludeFolders || []).filter(Boolean).map(normPath));
-    excludeSet.add(normPath(path.join(folderPath, SKIPPED_FOLDER_NAME)));
     const out = [];
     await collectImages(folderPath, folderPath, !!includeSubfolders, excludeSet, out);
     return out;
@@ -318,6 +320,10 @@ ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, exclu
 // Move a viewed-but-unsorted image to <rootFolder>\skipped.
 // Never overwrites: a name clash gets " (1)", " (2)", ... appended.
 ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder) => {
+  // Already browsing a skipped folder: leave images where they are
+  if (path.basename(path.resolve(rootFolder)).toLowerCase() === SKIPPED_FOLDER_NAME) {
+    return { success: false, noop: true };
+  }
   try {
     const destFolder = path.join(rootFolder, SKIPPED_FOLDER_NAME);
     await fs.mkdir(destFolder, { recursive: true });

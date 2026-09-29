@@ -187,7 +187,7 @@ async function navigate(step) {
                 displayImage();
                 return;
             }
-            console.error(result.error); // move failed: fall through to plain navigation
+            if (!result.noop) console.error(result.error); // not moved: fall through to plain navigation
         } finally {
             busy = false;
         }
