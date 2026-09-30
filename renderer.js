@@ -41,6 +41,27 @@ autoMoveCheckbox.addEventListener('change', async () => {
     await ipcRenderer.invoke('save-config', config);
 });
 
+// Settings menu
+const settingsBtn = document.getElementById('settings-btn');
+settingsBtn.addEventListener('click', () => {
+    settingsBtn.blur();
+    const rect = settingsBtn.getBoundingClientRect();
+    ipcRenderer.invoke('show-settings-menu', {
+        skippedFolder: config ? config.skippedFolder || '' : '',
+        x: rect.left,
+        y: rect.bottom
+    });
+});
+
+ipcRenderer.on('skipped-folder-changed', async (event, folder) => {
+    if (!config) return;
+    if ((config.skippedFolder || '') === folder) return;
+    config.skippedFolder = folder;
+    await ipcRenderer.invoke('save-config', config);
+    // The scan excludes the skipped folder, so refresh the list
+    if (config.sourceFolder) await loadImages();
+});
+
 // Sorting
 const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -123,6 +144,7 @@ async function loadImages() {
     }
 
     const excludeFolders = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
+    if (config.skippedFolder) excludeFolders.push(config.skippedFolder);
     images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, excludeFolders);
     
     if (images.length > 0) {
@@ -164,14 +186,15 @@ function hideNoImages() {
 let busy = false;
 
 // Navigate by step (+1 / -1). With auto-move on, the image being left
-// (viewed but not moved/deleted with a key) goes to <source>\skipped.
+// (viewed but not moved/deleted with a key) goes to the skipped folder
+// (Settings > Skipped folder location; default <source>\skipped).
 async function navigate(step) {
     if (images.length === 0 || busy) return;
 
     if (config && config.autoMoveSkipped && config.sourceFolder) {
         busy = true;
         try {
-            const result = await ipcRenderer.invoke('move-to-skipped', images[currentIndex].path, config.sourceFolder);
+            const result = await ipcRenderer.invoke('move-to-skipped', images[currentIndex].path, config.sourceFolder, config.skippedFolder || '');
             if (result.success) {
                 images.splice(currentIndex, 1);
                 if (images.length === 0) {
@@ -423,6 +446,7 @@ async function saveConfig() {
         sourceFolder: document.getElementById('source-folder').value,
         includeSubfolders: !!(config && config.includeSubfolders),
         autoMoveSkipped: !!(config && config.autoMoveSkipped),
+        skippedFolder: (config && config.skippedFolder) || '',
         destinationFolders: {},
         sortBy: sortBy,
         sortOrder: sortOrder

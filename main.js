@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
@@ -9,6 +9,7 @@ let mainWindow;
 
 // Config is stored in the registry under HKCU\Software\D20 Image Viewer:
 //   SortBy, SortOrder, AutoMoveSkipped ("1"/"0") (REG_SZ)
+//   SkippedFolder ("" = "skipped" in opened folder) (REG_SZ)
 //   Destinations\<id>\Name, Path, Key            (REG_SZ)
 // The source folder is NOT persisted; the app starts with no folder loaded.
 // Reads use `reg export` and writes use `reg import` with UTF-16 .reg data,
@@ -30,7 +31,8 @@ const DEFAULT_CONFIG = {
   },
   sortBy: 'name',
   sortOrder: 'asc',
-  autoMoveSkipped: false
+  autoMoveSkipped: false,
+  skippedFolder: '' // '' = "skipped" inside the opened folder
 };
 
 const SKIPPED_FOLDER_NAME = 'skipped';
@@ -96,6 +98,7 @@ async function readRegistryConfig(regKey = REG_KEY) {
       sortBy: root.values.SortBy || DEFAULT_CONFIG.sortBy,
       sortOrder: root.values.SortOrder || DEFAULT_CONFIG.sortOrder,
       autoMoveSkipped: root.values.AutoMoveSkipped === '1',
+      skippedFolder: root.values.SkippedFolder || '',
       destinationFolders: {}
     };
 
@@ -129,6 +132,7 @@ async function writeRegistryConfig(config) {
     `"SortBy"="${regEscape(config.sortBy || DEFAULT_CONFIG.sortBy)}"`,
     `"SortOrder"="${regEscape(config.sortOrder || DEFAULT_CONFIG.sortOrder)}"`,
     `"AutoMoveSkipped"="${config.autoMoveSkipped ? '1' : '0'}"`,
+    `"SkippedFolder"="${regEscape(config.skippedFolder || '')}"`,
     ''
   ];
   for (const [id, dest] of Object.entries(config.destinationFolders || {})) {
@@ -317,15 +321,17 @@ ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, exclu
   }
 });
 
-// Move a viewed-but-unsorted image to <rootFolder>\skipped.
+// Move a viewed-but-unsorted image to the skipped folder: skippedFolder when
+// set, otherwise <rootFolder>\skipped.
 // Never overwrites: a name clash gets " (1)", " (2)", ... appended.
-ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder) => {
+ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder, skippedFolder) => {
+  const destFolder = skippedFolder || path.join(rootFolder, SKIPPED_FOLDER_NAME);
   // Already browsing a skipped folder: leave images where they are
-  if (path.basename(path.resolve(rootFolder)).toLowerCase() === SKIPPED_FOLDER_NAME) {
+  if (path.basename(path.resolve(rootFolder)).toLowerCase() === SKIPPED_FOLDER_NAME ||
+      normPath(rootFolder) === normPath(destFolder)) {
     return { success: false, noop: true };
   }
   try {
-    const destFolder = path.join(rootFolder, SKIPPED_FOLDER_NAME);
     await fs.mkdir(destFolder, { recursive: true });
 
     const ext = path.extname(sourcePath);
@@ -335,12 +341,67 @@ ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder) => {
       destPath = path.join(destFolder, `${base} (${n})${ext}`);
     }
 
-    await fs.rename(sourcePath, destPath);
+    try {
+      await fs.rename(sourcePath, destPath);
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err;
+      // Different drive: copy (never overwriting), then remove the original
+      await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
+      await fs.unlink(sourcePath);
+    }
     return { success: true, newPath: destPath };
   } catch (error) {
     console.error('Error moving to skipped:', error);
     return { success: false, error: error.message };
   }
+});
+
+// Settings menu (toolbar ⚙ button). Changes are sent back to the renderer,
+// which owns the in-memory config and saves it.
+ipcMain.handle('show-settings-menu', (event, opts) => {
+  const current = (opts && opts.skippedFolder) || '';
+  const menuLabel = s => s.replace(/&/g, '&&'); // '&' is a mnemonic marker on Windows
+  const template = [
+    {
+      label: 'Skipped folder location',
+      submenu: [
+        {
+          label: menuLabel('Current: ' + (current || '"skipped" inside the opened folder')),
+          enabled: false
+        },
+        { type: 'separator' },
+        {
+          label: 'Choose folder…',
+          type: 'radio',
+          checked: !!current,
+          click: async () => {
+            const result = await dialog.showOpenDialog(mainWindow, {
+              title: 'Skipped folder location',
+              properties: ['openDirectory', 'createDirectory']
+            });
+            if (!result.canceled && result.filePaths.length > 0) {
+              event.sender.send('skipped-folder-changed', result.filePaths[0]);
+            }
+          }
+        },
+        {
+          label: 'Use "skipped" inside the opened folder',
+          type: 'radio',
+          checked: !current,
+          click: () => event.sender.send('skipped-folder-changed', '')
+        },
+        ...(current ? [{
+          label: 'Open current location',
+          click: () => shell.openPath(current)
+        }] : [])
+      ]
+    }
+  ];
+  Menu.buildFromTemplate(template).popup({
+    window: mainWindow,
+    x: Math.round((opts && opts.x) || 0),
+    y: Math.round((opts && opts.y) || 0)
+  });
 });
 
 ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
