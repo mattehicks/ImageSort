@@ -387,7 +387,7 @@ function physicalKey(e) {
 
 // Open folder handler
 document.getElementById('open-folder-btn').addEventListener('click', async () => {
-    const selection = await ipcRenderer.invoke('select-source-folder', scanExcludeFolders());
+    const selection = await ipcRenderer.invoke('select-source-folder', scanExcludeFolders(), config ? config.sourceFolder : '');
     if (selection) {
         config.sourceFolder = selection.folder;
         config.includeSubfolders = selection.includeSubfolders;

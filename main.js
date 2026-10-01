@@ -487,10 +487,11 @@ async function hasScannableSubfolder(dirPath, excludeFolders) {
   );
 }
 
-ipcMain.handle('select-source-folder', async (event, excludeFolders) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory']
-  });
+ipcMain.handle('select-source-folder', async (event, excludeFolders, currentFolder) => {
+  const options = { properties: ['openDirectory'] };
+  // Start the picker at the folder currently open (this session only)
+  if (currentFolder && fsSync.existsSync(currentFolder)) options.defaultPath = currentFolder;
+  const result = await dialog.showOpenDialog(mainWindow, options);
   if (result.canceled || result.filePaths.length === 0) return null;
 
   const folder = result.filePaths[0];
