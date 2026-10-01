@@ -415,6 +415,22 @@ ipcMain.handle('show-settings-menu', (event, opts) => {
   });
 });
 
+// Copy (not move) an image into a destination folder. Never overwrites.
+ipcMain.handle('copy-file', async (event, sourcePath, destFolder) => {
+  try {
+    await fs.mkdir(destFolder, { recursive: true });
+    const destPath = path.join(destFolder, path.basename(sourcePath));
+    if (fsSync.existsSync(destPath)) {
+      return { success: false, error: 'File already exists in destination' };
+    }
+    await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
+    return { success: true, newPath: destPath };
+  } catch (error) {
+    console.error('Error copying file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
   try {
     // Create destination folder if it doesn't exist

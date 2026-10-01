@@ -250,6 +250,18 @@ function previousImage() {
     return navigate(-1);
 }
 
+// Shift + folder key: copy the current image; it stays in the list and on screen
+async function copyToFolder(destKey) {
+    if (images.length === 0 || busy) return;
+
+    const destination = config.destinationFolders[destKey];
+    if (!destination || !destination.path) return;
+
+    busy = true;
+    const result = await ipcRenderer.invoke('copy-file', images[currentIndex].path, destination.path).finally(() => { busy = false; });
+    if (!result.success) console.error(result.error);
+}
+
 async function moveToFolder(destKey) {
     if (images.length === 0 || busy) return;
     
@@ -333,7 +345,16 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === 'x' || e.key === 'X') {
         deleteCurrentImage();
     } else if (config && config.destinationFolders) {
-        // Check for destination folder keys
+        // Folder keys move the image; Shift + folder key copies it
+        if (e.shiftKey) {
+            const pressed = physicalKey(e);
+            Object.entries(config.destinationFolders).forEach(([key, folder]) => {
+                if (folder.key && pressed === folder.key.toLowerCase()) {
+                    copyToFolder(key);
+                }
+            });
+            return;
+        }
         Object.entries(config.destinationFolders).forEach(([key, folder]) => {
             if (e.key === folder.key) {
                 moveToFolder(key);
@@ -341,6 +362,16 @@ document.addEventListener('keydown', (e) => {
         });
     }
 });
+
+// The unshifted character of the physical key pressed (Shift+1 -> "1",
+// Shift+Numpad1 -> "1", Shift+A -> "a"), independent of keyboard layout symbols.
+function physicalKey(e) {
+    let m = /^Digit(\d)$/.exec(e.code) || /^Numpad(\d)$/.exec(e.code);
+    if (m) return m[1];
+    m = /^Key([A-Z])$/.exec(e.code);
+    if (m) return m[1].toLowerCase();
+    return (e.key || '').toLowerCase();
+}
 
 // Open folder handler
 document.getElementById('open-folder-btn').addEventListener('click', async () => {
