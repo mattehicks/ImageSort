@@ -76,6 +76,10 @@ function compareImages(a, b) {
         case 'ext':
             result = nameCollator.compare(a.ext, b.ext);
             break;
+        case 'order':
+            // Order the folder scan returned the files in
+            result = a.order - b.order;
+            break;
         case 'name':
         default:
             result = 0;
@@ -146,6 +150,7 @@ async function loadImages() {
     const excludeFolders = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
     if (config.skippedFolder) excludeFolders.push(config.skippedFolder);
     images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, excludeFolders);
+    images.forEach((img, i) => { img.order = i; }); // scan order, for "As given in selection"
     
     if (images.length > 0) {
         sortImages(false);
