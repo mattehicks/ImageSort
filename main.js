@@ -457,13 +457,36 @@ ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
   }
 });
 
-ipcMain.handle('select-source-folder', async () => {
+// True if dirPath has at least one subfolder the recursive scan would enter
+// (not a symlink/junction, not named "skipped", not in excludeFolders).
+async function hasScannableSubfolder(dirPath, excludeFolders) {
+  const excludeSet = new Set((excludeFolders || []).filter(Boolean).map(normPath));
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (err) {
+    return false;
+  }
+  return entries.some(entry =>
+    entry.isDirectory() &&
+    !entry.isSymbolicLink() &&
+    entry.name.toLowerCase() !== SKIPPED_FOLDER_NAME &&
+    !excludeSet.has(normPath(path.join(dirPath, entry.name)))
+  );
+}
+
+ipcMain.handle('select-source-folder', async (event, excludeFolders) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
   });
   if (result.canceled || result.filePaths.length === 0) return null;
 
   const folder = result.filePaths[0];
+  // Nothing to include: open it directly without asking
+  if (!(await hasScannableSubfolder(folder, excludeFolders))) {
+    return { folder, includeSubfolders: false };
+  }
+
   const answer = await dialog.showMessageBox(mainWindow, {
     type: 'none',
     title: 'Open Folder',

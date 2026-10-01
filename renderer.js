@@ -149,15 +149,21 @@ sortDirBtn.addEventListener('click', () => {
     applySort();
 });
 
+// Folders the scan never enters: destination folders and a custom skipped folder
+function scanExcludeFolders() {
+    if (!config) return [];
+    const list = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
+    if (config.skippedFolder) list.push(config.skippedFolder);
+    return list;
+}
+
 async function loadImages() {
     if (!config || !config.sourceFolder) {
         showNoImages();
         return;
     }
 
-    const excludeFolders = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
-    if (config.skippedFolder) excludeFolders.push(config.skippedFolder);
-    images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, excludeFolders);
+    images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, scanExcludeFolders());
     images.forEach((img, i) => { img.order = i; }); // scan order, for "As given in selection"
     
     if (images.length > 0) {
@@ -381,7 +387,7 @@ function physicalKey(e) {
 
 // Open folder handler
 document.getElementById('open-folder-btn').addEventListener('click', async () => {
-    const selection = await ipcRenderer.invoke('select-source-folder');
+    const selection = await ipcRenderer.invoke('select-source-folder', scanExcludeFolders());
     if (selection) {
         config.sourceFolder = selection.folder;
         config.includeSubfolders = selection.includeSubfolders;
