@@ -124,11 +124,43 @@ function updateSortControls() {
     sortDirBtn.disabled = sortBy === 'random';
 }
 
+// "Processing…" in the filename spot while work runs; filename restored after.
+let processingCount = 0;
+
+function nextPaint() {
+    // Let the browser draw the text before synchronous work (sorting) starts
+    return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+}
+
+function refreshFilename() {
+    filenameEl.textContent = images.length > 0 && images[currentIndex]
+        ? displayName(images[currentIndex])
+        : 'No images';
+}
+
+async function withProcessing(fn) {
+    processingCount++;
+    filenameEl.textContent = 'Processing…';
+    filenameEl.classList.add('processing');
+    await nextPaint();
+    try {
+        return await fn();
+    } finally {
+        processingCount--;
+        if (processingCount === 0) {
+            filenameEl.classList.remove('processing');
+            refreshFilename();
+        }
+    }
+}
+
 async function applySort() {
     updateSortControls();
     if (images.length > 0) {
-        sortImages(true);
-        displayImage();
+        await withProcessing(() => {
+            sortImages(true);
+            displayImage();
+        });
     }
     if (config) {
         config.sortBy = sortBy;
@@ -162,7 +194,10 @@ async function loadImages() {
         showNoImages();
         return;
     }
+    await withProcessing(loadImagesNow);
+}
 
+async function loadImagesNow() {
     images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, scanExcludeFolders());
     images.forEach((img, i) => { img.order = i; }); // scan order, for "As given in selection"
     
@@ -266,7 +301,7 @@ async function copyToFolder(destKey) {
 
     busy = true;
     const img = images[currentIndex];
-    const result = await ipcRenderer.invoke('copy-file', img.path, destination.path).finally(() => { busy = false; });
+    const result = await withProcessing(() => ipcRenderer.invoke('copy-file', img.path, destination.path)).finally(() => { busy = false; });
     if (result.success || result.alreadyExists) {
         img.copied = true; // exempt from auto-move skipped
     } else {
