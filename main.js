@@ -10,6 +10,7 @@ let mainWindow;
 // Config is stored in the registry under HKCU\Software\D20 Image Viewer:
 //   SortBy, SortOrder, AutoMoveSkipped ("1"/"0") (REG_SZ)
 //   SkippedFolder ("" = "skipped" in opened folder) (REG_SZ)
+//   ShowFolderName ("1"/"0")                     (REG_SZ)
 //   Destinations\<id>\Name, Path, Key            (REG_SZ)
 // The source folder is NOT persisted; the app starts with no folder loaded.
 // Reads use `reg export` and writes use `reg import` with UTF-16 .reg data,
@@ -32,7 +33,8 @@ const DEFAULT_CONFIG = {
   sortBy: 'name',
   sortOrder: 'asc',
   autoMoveSkipped: false,
-  skippedFolder: '' // '' = "skipped" inside the opened folder
+  skippedFolder: '', // '' = "skipped" inside the opened folder
+  showFolderName: false
 };
 
 const SKIPPED_FOLDER_NAME = 'skipped';
@@ -99,6 +101,7 @@ async function readRegistryConfig(regKey = REG_KEY) {
       sortOrder: root.values.SortOrder || DEFAULT_CONFIG.sortOrder,
       autoMoveSkipped: root.values.AutoMoveSkipped === '1',
       skippedFolder: root.values.SkippedFolder || '',
+      showFolderName: root.values.ShowFolderName === '1',
       destinationFolders: {}
     };
 
@@ -133,6 +136,7 @@ async function writeRegistryConfig(config) {
     `"SortOrder"="${regEscape(config.sortOrder || DEFAULT_CONFIG.sortOrder)}"`,
     `"AutoMoveSkipped"="${config.autoMoveSkipped ? '1' : '0'}"`,
     `"SkippedFolder"="${regEscape(config.skippedFolder || '')}"`,
+    `"ShowFolderName"="${config.showFolderName ? '1' : '0'}"`,
     ''
   ];
   for (const [id, dest] of Object.entries(config.destinationFolders || {})) {
@@ -362,6 +366,13 @@ ipcMain.handle('show-settings-menu', (event, opts) => {
   const current = (opts && opts.skippedFolder) || '';
   const menuLabel = s => s.replace(/&/g, '&&'); // '&' is a mnemonic marker on Windows
   const template = [
+    {
+      label: 'Show folder name',
+      type: 'checkbox',
+      checked: !!(opts && opts.showFolderName),
+      click: (item) => event.sender.send('show-folder-name-changed', item.checked)
+    },
+    { type: 'separator' },
     {
       label: 'Skipped folder location',
       submenu: [

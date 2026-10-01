@@ -48,9 +48,17 @@ settingsBtn.addEventListener('click', () => {
     const rect = settingsBtn.getBoundingClientRect();
     ipcRenderer.invoke('show-settings-menu', {
         skippedFolder: config ? config.skippedFolder || '' : '',
+        showFolderName: !!(config && config.showFolderName),
         x: rect.left,
         y: rect.bottom
     });
+});
+
+ipcRenderer.on('show-folder-name-changed', async (event, checked) => {
+    if (!config) return;
+    config.showFolderName = checked;
+    if (images.length > 0) displayImage();
+    await ipcRenderer.invoke('save-config', config);
 });
 
 ipcRenderer.on('skipped-folder-changed', async (event, folder) => {
@@ -171,8 +179,17 @@ function displayImage() {
     const imagePath = images[currentIndex].path;
     imageEl.src = imagePath;
     imageCounterEl.textContent = `${currentIndex + 1} / ${images.length}`;
-    filenameEl.textContent = images[currentIndex].relPath || images[currentIndex].name;
+    filenameEl.textContent = displayName(images[currentIndex]);
     hideNoImages();
+}
+
+// "Show folder name" on: immediate parent folder + filename (folder/img.png).
+// Off: filename only.
+function displayName(img) {
+    if (!(config && config.showFolderName)) return img.name;
+    const parts = img.path.split(/[\\/]+/).filter(Boolean);
+    const parent = parts.length >= 2 ? parts[parts.length - 2] : '';
+    return parent ? `${parent}/${img.name}` : img.name;
 }
 
 function showNoImages() {
@@ -452,6 +469,7 @@ async function saveConfig() {
         includeSubfolders: !!(config && config.includeSubfolders),
         autoMoveSkipped: !!(config && config.autoMoveSkipped),
         skippedFolder: (config && config.skippedFolder) || '',
+        showFolderName: !!(config && config.showFolderName),
         destinationFolders: {},
         sortBy: sortBy,
         sortOrder: sortOrder
