@@ -421,7 +421,7 @@ ipcMain.handle('copy-file', async (event, sourcePath, destFolder) => {
     await fs.mkdir(destFolder, { recursive: true });
     const destPath = path.join(destFolder, path.basename(sourcePath));
     if (fsSync.existsSync(destPath)) {
-      return { success: false, error: 'File already exists in destination' };
+      return { success: false, alreadyExists: true, error: 'File already exists in destination' };
     }
     await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
     return { success: true, newPath: destPath };

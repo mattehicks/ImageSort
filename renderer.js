@@ -213,7 +213,8 @@ let busy = false;
 async function navigate(step) {
     if (images.length === 0 || busy) return;
 
-    if (config && config.autoMoveSkipped && config.sourceFolder) {
+    // Images copied with Shift + folder key are categorized: leave them in place
+    if (config && config.autoMoveSkipped && config.sourceFolder && !images[currentIndex].copied) {
         busy = true;
         try {
             const result = await ipcRenderer.invoke('move-to-skipped', images[currentIndex].path, config.sourceFolder, config.skippedFolder || '');
@@ -258,8 +259,13 @@ async function copyToFolder(destKey) {
     if (!destination || !destination.path) return;
 
     busy = true;
-    const result = await ipcRenderer.invoke('copy-file', images[currentIndex].path, destination.path).finally(() => { busy = false; });
-    if (!result.success) console.error(result.error);
+    const img = images[currentIndex];
+    const result = await ipcRenderer.invoke('copy-file', img.path, destination.path).finally(() => { busy = false; });
+    if (result.success || result.alreadyExists) {
+        img.copied = true; // exempt from auto-move skipped
+    } else {
+        console.error(result.error);
+    }
 }
 
 async function moveToFolder(destKey) {
