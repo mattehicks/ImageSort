@@ -39,6 +39,16 @@ const DEFAULT_CONFIG = {
 
 const SKIPPED_FOLDER_NAME = 'skipped';
 
+// Windows system folders: never scanned and don't count as subfolders.
+// "$..." anywhere; the named ones only at a drive root (e.g. E:\).
+const ROOT_SYSTEM_FOLDERS = new Set(['system volume information', 'recovery', 'config.msi', 'msocache']);
+function isSystemFolder(parentDir, name) {
+  if (name.startsWith('$')) return true;
+  const resolved = path.resolve(parentDir);
+  const atDriveRoot = path.parse(resolved).root.toLowerCase() === resolved.toLowerCase(); // "E:\" === "E:\"
+  return atDriveRoot && ROOT_SYSTEM_FOLDERS.has(name.toLowerCase());
+}
+
 async function readJson(filePath) {
   const data = await fs.readFile(filePath, 'utf8');
   return JSON.parse(data);
@@ -283,6 +293,7 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
       // Any folder named "skipped" is left out of the scan. The opened folder
       // itself is never excluded, so picking a skipped folder directly loads it.
       if (entry.name.toLowerCase() === SKIPPED_FOLDER_NAME) continue;
+      if (isSystemFolder(dirPath, entry.name)) continue;
       if (recursive && !excludeSet.has(normPath(fullPath))) subdirs.push(fullPath);
     } else if (entry.isFile() && isImage) {
       files.push(fullPath);
@@ -471,6 +482,7 @@ async function hasScannableSubfolder(dirPath, excludeFolders) {
     entry.isDirectory() &&
     !entry.isSymbolicLink() &&
     entry.name.toLowerCase() !== SKIPPED_FOLDER_NAME &&
+    !isSystemFolder(dirPath, entry.name) &&
     !excludeSet.has(normPath(path.join(dirPath, entry.name)))
   );
 }
