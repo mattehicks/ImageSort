@@ -39,6 +39,18 @@ const DEFAULT_CONFIG = {
 
 const SKIPPED_FOLDER_NAME = 'skipped';
 
+// Set a file's modified date to now (used after every move/copy, so a folder
+// sorted by date modified shows the order images were categorized in).
+// A failure here never fails the move itself.
+async function touchModified(filePath) {
+  try {
+    const stat = await fs.stat(filePath);
+    await fs.utimes(filePath, stat.atime, new Date());
+  } catch (err) {
+    console.error('Could not update modified date:', filePath, err);
+  }
+}
+
 // Windows system folders: never scanned and don't count as subfolders.
 // "$..." anywhere; the named ones only at a drive root (e.g. E:\).
 const ROOT_SYSTEM_FOLDERS = new Set(['system volume information', 'recovery', 'config.msi', 'msocache']);
@@ -364,6 +376,7 @@ ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder, skippedF
       await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
       await fs.unlink(sourcePath);
     }
+    await touchModified(destPath);
     return { success: true, newPath: destPath };
   } catch (error) {
     console.error('Error moving to skipped:', error);
@@ -435,6 +448,7 @@ ipcMain.handle('copy-file', async (event, sourcePath, destFolder) => {
       return { success: false, alreadyExists: true, error: 'File already exists in destination' };
     }
     await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
+    await touchModified(destPath);
     return { success: true, newPath: destPath };
   } catch (error) {
     console.error('Error copying file:', error);
@@ -461,6 +475,7 @@ ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
     }
 
     await fs.rename(sourcePath, destPath);
+    await touchModified(destPath);
     return { success: true, newPath: destPath };
   } catch (error) {
     console.error('Error moving file:', error);
