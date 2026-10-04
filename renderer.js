@@ -156,15 +156,16 @@ async function withProcessing(fn) {
 
 async function applySort() {
     updateSortControls();
-    if (images.length > 0) {
-        await withProcessing(() => {
-            sortImages(true);
-            displayImage();
-        });
-    }
     if (config) {
         config.sortBy = sortBy;
         config.sortOrder = sortOrder;
+    }
+    // Rescan the folder (like Reload) so the new order uses current file data,
+    // then start at the first image
+    if (config && config.sourceFolder) {
+        await loadImages();
+    }
+    if (config) {
         await ipcRenderer.invoke('save-config', config);
     }
 }
