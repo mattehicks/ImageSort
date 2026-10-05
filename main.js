@@ -338,6 +338,8 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
 
 ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, excludeFolders) => {
   try {
+    // Let queued background moves/copies finish so the scan sees final state
+    await fileOpQueue;
     const excludeSet = new Set((excludeFolders || []).filter(Boolean).map(normPath));
     const out = [];
     await collectImages(folderPath, folderPath, !!includeSubfolders, excludeSet, out);
@@ -348,10 +350,90 @@ ipcMain.handle('load-images', async (event, folderPath, includeSubfolders, exclu
   }
 });
 
+// ---- File operations: queued, collision-safe -----------------------------
+
+// Run file operations one at a time, in order. The renderer doesn't wait on
+// them (moves/copies/skips update the view immediately), so this keeps two
+// operations from claiming the same "name (n)" or touching the same file.
+let fileOpQueue = Promise.resolve();
+function queueFileOp(fn) {
+  const p = fileOpQueue.then(fn);
+  fileOpQueue = p.catch(() => {});
+  return p;
+}
+
+// Quick identical-content check: sizes first, then the start, middle and end
+// (64 KB each) of both files; files up to 192 KB are compared in full.
+const SAMPLE_CHUNK = 64 * 1024;
+async function quickIdentical(a, b) {
+  const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)]);
+  if (sa.size !== sb.size) return false;
+  if (sa.size === 0) return true;
+
+  const whole = sa.size <= 3 * SAMPLE_CHUNK;
+  const len = whole ? sa.size : SAMPLE_CHUNK;
+  const offsets = whole ? [0] : [0, Math.floor(sa.size / 2) - SAMPLE_CHUNK / 2, sa.size - SAMPLE_CHUNK];
+
+  const [ha, hb] = await Promise.all([fs.open(a, 'r'), fs.open(b, 'r')]);
+  try {
+    const bufA = Buffer.alloc(len);
+    const bufB = Buffer.alloc(len);
+    for (const offset of offsets) {
+      await Promise.all([ha.read(bufA, 0, len, offset), hb.read(bufB, 0, len, offset)]);
+      if (!bufA.equals(bufB)) return false;
+    }
+    return true;
+  } finally {
+    await Promise.all([ha.close(), hb.close()]);
+  }
+}
+
+// Where sourcePath should land in destFolder:
+//   { destPath, identical: false } - free name ("name.jpg" or "name (n).jpg")
+//   { destPath, identical: true }  - destFolder already has an identical "name.jpg"
+async function resolveDestination(sourcePath, destFolder) {
+  const ext = path.extname(sourcePath);
+  const base = path.basename(sourcePath, ext);
+  const first = path.join(destFolder, base + ext);
+  if (!fsSync.existsSync(first)) return { destPath: first, identical: false };
+  if (await quickIdentical(sourcePath, first)) return { destPath: first, identical: true };
+  let destPath = first;
+  for (let n = 1; fsSync.existsSync(destPath); n++) {
+    destPath = path.join(destFolder, `${base} (${n})${ext}`);
+  }
+  return { destPath, identical: false };
+}
+
+// Rename, or copy (never overwriting) + delete when crossing drives
+async function moveFileTo(sourcePath, destPath) {
+  try {
+    await fs.rename(sourcePath, destPath);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
+    await fs.unlink(sourcePath);
+  }
+}
+
+// Move into destFolder. Identical file already there: the source goes to the
+// Recycle Bin and the move counts as done. Different file with the same name:
+// saved as "name (n).ext".
+async function moveIntoFolder(sourcePath, destFolder) {
+  await fs.mkdir(destFolder, { recursive: true });
+  const { destPath, identical } = await resolveDestination(sourcePath, destFolder);
+  if (identical) {
+    await shell.trashItem(sourcePath);
+    await touchModified(destPath);
+    return { success: true, duplicate: true, newPath: destPath };
+  }
+  await moveFileTo(sourcePath, destPath);
+  await touchModified(destPath);
+  return { success: true, newPath: destPath, renamed: path.basename(destPath) !== path.basename(sourcePath) };
+}
+
 // Move a viewed-but-unsorted image to the skipped folder: skippedFolder when
 // set, otherwise <rootFolder>\skipped.
-// Never overwrites: a name clash gets " (1)", " (2)", ... appended.
-ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder, skippedFolder) => {
+ipcMain.handle('move-to-skipped', (event, sourcePath, rootFolder, skippedFolder) => queueFileOp(async () => {
   const destFolder = skippedFolder || path.join(rootFolder, SKIPPED_FOLDER_NAME);
   // Already browsing a skipped folder: leave images where they are
   if (path.basename(path.resolve(rootFolder)).toLowerCase() === SKIPPED_FOLDER_NAME ||
@@ -359,30 +441,12 @@ ipcMain.handle('move-to-skipped', async (event, sourcePath, rootFolder, skippedF
     return { success: false, noop: true };
   }
   try {
-    await fs.mkdir(destFolder, { recursive: true });
-
-    const ext = path.extname(sourcePath);
-    const base = path.basename(sourcePath, ext);
-    let destPath = path.join(destFolder, base + ext);
-    for (let n = 1; fsSync.existsSync(destPath); n++) {
-      destPath = path.join(destFolder, `${base} (${n})${ext}`);
-    }
-
-    try {
-      await fs.rename(sourcePath, destPath);
-    } catch (err) {
-      if (err.code !== 'EXDEV') throw err;
-      // Different drive: copy (never overwriting), then remove the original
-      await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
-      await fs.unlink(sourcePath);
-    }
-    await touchModified(destPath);
-    return { success: true, newPath: destPath };
+    return await moveIntoFolder(sourcePath, destFolder);
   } catch (error) {
     console.error('Error moving to skipped:', error);
     return { success: false, error: error.message };
   }
-});
+}));
 
 // Settings menu (toolbar ⚙ button). Changes are sent back to the renderer,
 // which owns the in-memory config and saves it.
@@ -439,57 +503,32 @@ ipcMain.handle('show-settings-menu', (event, opts) => {
   });
 });
 
-// Copy (not move) an image into a destination folder. Never overwrites.
-ipcMain.handle('copy-file', async (event, sourcePath, destFolder) => {
+// Copy into destFolder. Identical file already there: nothing written, counts
+// as done. Different file with the same name: saved as "name (n).ext".
+ipcMain.handle('copy-file', (event, sourcePath, destFolder) => queueFileOp(async () => {
   try {
     await fs.mkdir(destFolder, { recursive: true });
-    const destPath = path.join(destFolder, path.basename(sourcePath));
-    if (fsSync.existsSync(destPath)) {
-      return { success: false, alreadyExists: true, error: 'File already exists in destination' };
+    const { destPath, identical } = await resolveDestination(sourcePath, destFolder);
+    if (identical) {
+      return { success: true, duplicate: true, newPath: destPath };
     }
     await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
     await touchModified(destPath);
-    return { success: true, newPath: destPath };
+    return { success: true, newPath: destPath, renamed: path.basename(destPath) !== path.basename(sourcePath) };
   } catch (error) {
     console.error('Error copying file:', error);
     return { success: false, error: error.message };
   }
-});
+}));
 
-ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
+ipcMain.handle('move-file', (event, sourcePath, destFolder) => queueFileOp(async () => {
   try {
-    // Create destination folder if it doesn't exist
-    if (!fsSync.existsSync(destFolder)) {
-      await fs.mkdir(destFolder, { recursive: true });
-    }
-
-    const fileName = path.basename(sourcePath);
-    const destPath = path.join(destFolder, fileName);
-
-    // Check if file already exists
-    if (fsSync.existsSync(destPath)) {
-      return { 
-        success: false, 
-        alreadyExists: true,
-        error: 'File already exists in destination folder' 
-      };
-    }
-
-    try {
-      await fs.rename(sourcePath, destPath);
-    } catch (err) {
-      if (err.code !== 'EXDEV') throw err;
-      // Different drive: copy (never overwriting), then remove the original
-      await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
-      await fs.unlink(sourcePath);
-    }
-    await touchModified(destPath);
-    return { success: true, newPath: destPath };
+    return await moveIntoFolder(sourcePath, destFolder);
   } catch (error) {
     console.error('Error moving file:', error);
     return { success: false, error: error.message };
   }
-});
+}));
 
 // True if dirPath has at least one subfolder the recursive scan would enter
 // (not a symlink/junction, not named "skipped", not in excludeFolders).

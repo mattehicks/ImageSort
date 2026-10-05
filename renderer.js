@@ -151,13 +151,15 @@ function flashStatus(text, detail) {
     }, 2000);
 }
 
-function reportFailure(action, result) {
+function reportFailure(action, result, img) {
+    const error = (result && result.error) || 'Unknown error';
+    const detail = img ? `${img.name}: ${error}` : error;
     if (result && result.alreadyExists) {
-        flashStatus('Exists', result.error);
+        flashStatus('Exists', detail);
     } else {
-        flashStatus(`${action} failed`, result && result.error);
+        flashStatus(`${action} failed`, detail);
     }
-    console.error(`${action} failed:`, result && result.error);
+    console.error(`${action} failed:`, detail);
 }
 
 function nextPaint() {
@@ -233,6 +235,7 @@ async function loadImages() {
 }
 
 async function loadImagesNow() {
+    loadGeneration++;
     images = await ipcRenderer.invoke('load-images', config.sourceFolder, !!config.includeSubfolders, scanExcludeFolders());
     images.forEach((img, i) => { img.order = i; }); // scan order, for "As given in selection"
     
@@ -281,45 +284,80 @@ function hideNoImages() {
     noImageMsg.style.display = 'none';
 }
 
-// Serializes file operations so fast key presses can't act on the wrong image
+// Serializes delete so fast key presses can't act on the wrong image
 let busy = false;
+
+// Incremented on every folder load; a background failure from an older load
+// doesn't put its image back into the new list (the rescan already has it).
+let loadGeneration = 0;
+
+// Take the current image out of the list. Returns what's needed to put it back.
+function takeCurrent() {
+    const idx = currentIndex;
+    const img = images[idx];
+    images.splice(idx, 1);
+    return { img, idx, gen: loadGeneration };
+}
+
+// Put an image back after a background operation failed
+function restoreImage(taken) {
+    if (taken.gen !== loadGeneration || images.includes(taken.img)) return;
+    const at = Math.min(taken.idx, images.length);
+    images.splice(at, 0, taken.img);
+    if (images.length === 1) {
+        currentIndex = 0;
+        displayImage();
+        return;
+    }
+    if (at <= currentIndex) currentIndex++; // keep the image on screen the same
+    imageCounterEl.textContent = `${currentIndex + 1} / ${images.length}`;
+}
+
+// After removing images[idx]: show the image that took its place (or wrap)
+function showAfterRemoval(idx, step) {
+    if (images.length === 0) {
+        showNoImages();
+        return;
+    }
+    if (step < 0) {
+        currentIndex = (idx - 1 + images.length) % images.length;
+    } else {
+        currentIndex = idx >= images.length ? (step > 0 ? 0 : images.length - 1) : idx;
+    }
+    displayImage();
+}
+
+// Auto-move does nothing while browsing a skipped folder itself
+function browsingSkippedFolder() {
+    const src = (config.sourceFolder || '').replace(/[\\/]+$/, '');
+    const name = src.split(/[\\/]/).pop().toLowerCase();
+    if (name === 'skipped') return true;
+    const custom = (config.skippedFolder || '').replace(/[\\/]+$/, '');
+    return !!custom && custom.toLowerCase() === src.toLowerCase();
+}
 
 // Navigate by step (+1 / -1). With auto-move on, the image being left
 // (viewed but not moved/deleted with a key) goes to the skipped folder
 // (Settings > Skipped folder location; default <source>\skipped).
+// The move runs in the background; the next image shows immediately.
 async function navigate(step) {
     if (images.length === 0 || busy) return;
 
-    let skipFailure = null;
     // Images copied with Shift + folder key are categorized: leave them in place
-    if (config && config.autoMoveSkipped && config.sourceFolder && !images[currentIndex].copied) {
-        busy = true;
-        try {
-            const result = await ipcRenderer.invoke('move-to-skipped', images[currentIndex].path, config.sourceFolder, config.skippedFolder || '');
-            if (result.success) {
-                images.splice(currentIndex, 1);
-                if (images.length === 0) {
-                    showNoImages();
-                    return;
-                }
-                if (step > 0) {
-                    // next image has shifted into currentIndex
-                    if (currentIndex >= images.length) currentIndex = 0;
-                } else {
-                    currentIndex = (currentIndex - 1 + images.length) % images.length;
-                }
-                displayImage();
-                return;
-            }
-            if (!result.noop) skipFailure = result; // not moved: fall through to plain navigation
-        } finally {
-            busy = false;
+    if (config && config.autoMoveSkipped && config.sourceFolder &&
+        !images[currentIndex].copied && !browsingSkippedFolder()) {
+        const taken = takeCurrent();
+        showAfterRemoval(taken.idx, step);
+        const result = await ipcRenderer.invoke('move-to-skipped', taken.img.path, config.sourceFolder, config.skippedFolder || '');
+        if (!result.success) {
+            restoreImage(taken);
+            if (!result.noop) reportFailure('Skip', result, taken.img);
         }
+        return;
     }
 
     currentIndex = (currentIndex + step + images.length) % images.length;
     displayImage();
-    if (skipFailure) reportFailure('Skip', skipFailure);
 }
 
 function nextImage() {
@@ -330,47 +368,38 @@ function previousImage() {
     return navigate(-1);
 }
 
-// Shift + folder key: copy the current image; it stays in the list and on screen
+// Shift + folder key: copy the current image in the background; it stays in
+// the list and on screen
 async function copyToFolder(destKey) {
     if (images.length === 0 || busy) return;
 
     const destination = config.destinationFolders[destKey];
     if (!destination || !destination.path) return;
 
-    busy = true;
     const img = images[currentIndex];
-    const result = await withProcessing(() => ipcRenderer.invoke('copy-file', img.path, destination.path)).finally(() => { busy = false; });
-    if (result.success || result.alreadyExists) {
-        img.copied = true; // exempt from auto-move skipped
+    const wasCopied = !!img.copied;
+    img.copied = true; // exempt from auto-move skipped
+    const result = await ipcRenderer.invoke('copy-file', img.path, destination.path);
+    if (!result.success) {
+        img.copied = wasCopied;
+        reportFailure('Copy', result, img);
     }
-    if (!result.success) reportFailure('Copy', result);
 }
 
+// Folder key: move the current image in the background; the next image shows
+// immediately, and the image comes back if the move fails
 async function moveToFolder(destKey) {
     if (images.length === 0 || busy) return;
     
     const destination = config.destinationFolders[destKey];
-    if (!destination) return;
+    if (!destination || !destination.path) return;
 
-    busy = true;
-    const currentImage = images[currentIndex].path;
-    const result = await ipcRenderer.invoke('move-file', currentImage, destination.path).finally(() => { busy = false; });
-    
-    if (result.success) {
-        // Remove from current list
-        images.splice(currentIndex, 1);
-        
-        // Adjust index
-        if (images.length === 0) {
-            showNoImages();
-        } else {
-            if (currentIndex >= images.length) {
-                currentIndex = images.length - 1;
-            }
-            displayImage();
-        }
-    } else {
-        reportFailure('Move', result);
+    const taken = takeCurrent();
+    showAfterRemoval(taken.idx, 0);
+    const result = await ipcRenderer.invoke('move-file', taken.img.path, destination.path);
+    if (!result.success) {
+        restoreImage(taken);
+        reportFailure('Move', result, taken.img);
     }
 }
 
