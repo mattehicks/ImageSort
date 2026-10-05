@@ -470,11 +470,19 @@ ipcMain.handle('move-file', async (event, sourcePath, destFolder) => {
     if (fsSync.existsSync(destPath)) {
       return { 
         success: false, 
+        alreadyExists: true,
         error: 'File already exists in destination folder' 
       };
     }
 
-    await fs.rename(sourcePath, destPath);
+    try {
+      await fs.rename(sourcePath, destPath);
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err;
+      // Different drive: copy (never overwriting), then remove the original
+      await fs.copyFile(sourcePath, destPath, fsSync.constants.COPYFILE_EXCL);
+      await fs.unlink(sourcePath);
+    }
     await touchModified(destPath);
     return { success: true, newPath: destPath };
   } catch (error) {

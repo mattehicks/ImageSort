@@ -127,6 +127,39 @@ function updateSortControls() {
 // "Processing…" in the filename spot while work runs; filename restored after.
 let processingCount = 0;
 
+// Short failure message in the filename spot ("Exists", "Move failed", ...).
+// Full error in the tooltip. Clears after 2s or when another image is shown.
+let statusTimer = null;
+
+function clearStatus() {
+    if (statusTimer) {
+        clearTimeout(statusTimer);
+        statusTimer = null;
+    }
+    filenameEl.classList.remove('status-error');
+    filenameEl.title = '';
+}
+
+function flashStatus(text, detail) {
+    clearStatus();
+    filenameEl.textContent = text;
+    filenameEl.title = detail || '';
+    filenameEl.classList.add('status-error');
+    statusTimer = setTimeout(() => {
+        clearStatus();
+        if (processingCount === 0) refreshFilename();
+    }, 2000);
+}
+
+function reportFailure(action, result) {
+    if (result && result.alreadyExists) {
+        flashStatus('Exists', result.error);
+    } else {
+        flashStatus(`${action} failed`, result && result.error);
+    }
+    console.error(`${action} failed:`, result && result.error);
+}
+
 function nextPaint() {
     // Let the browser draw the text before synchronous work (sorting) starts
     return new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
@@ -140,6 +173,7 @@ function refreshFilename() {
 
 async function withProcessing(fn) {
     processingCount++;
+    clearStatus();
     filenameEl.textContent = 'Processing…';
     filenameEl.classList.add('processing');
     await nextPaint();
@@ -219,6 +253,7 @@ function displayImage() {
     }
 
     const imagePath = images[currentIndex].path;
+    clearStatus();
     imageEl.src = imagePath;
     imageCounterEl.textContent = `${currentIndex + 1} / ${images.length}`;
     filenameEl.textContent = displayName(images[currentIndex]);
@@ -255,6 +290,7 @@ let busy = false;
 async function navigate(step) {
     if (images.length === 0 || busy) return;
 
+    let skipFailure = null;
     // Images copied with Shift + folder key are categorized: leave them in place
     if (config && config.autoMoveSkipped && config.sourceFolder && !images[currentIndex].copied) {
         busy = true;
@@ -275,7 +311,7 @@ async function navigate(step) {
                 displayImage();
                 return;
             }
-            if (!result.noop) console.error(result.error); // not moved: fall through to plain navigation
+            if (!result.noop) skipFailure = result; // not moved: fall through to plain navigation
         } finally {
             busy = false;
         }
@@ -283,6 +319,7 @@ async function navigate(step) {
 
     currentIndex = (currentIndex + step + images.length) % images.length;
     displayImage();
+    if (skipFailure) reportFailure('Skip', skipFailure);
 }
 
 function nextImage() {
@@ -305,9 +342,8 @@ async function copyToFolder(destKey) {
     const result = await withProcessing(() => ipcRenderer.invoke('copy-file', img.path, destination.path)).finally(() => { busy = false; });
     if (result.success || result.alreadyExists) {
         img.copied = true; // exempt from auto-move skipped
-    } else {
-        console.error(result.error);
     }
+    if (!result.success) reportFailure('Copy', result);
 }
 
 async function moveToFolder(destKey) {
@@ -334,7 +370,7 @@ async function moveToFolder(destKey) {
             displayImage();
         }
     } else {
-        console.error(result.error);
+        reportFailure('Move', result);
     }
 }
 
@@ -359,7 +395,7 @@ async function deleteCurrentImage() {
             displayImage();
         }
     } else {
-        console.error(result.error);
+        reportFailure('Delete', result);
     }
 }
 
