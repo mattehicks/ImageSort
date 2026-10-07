@@ -6,7 +6,8 @@
 //   Drag a line .............. move it; drag it off the image to remove it
 //   Right-click a line ....... remove it
 //   Click a section .......... highlight / unhighlight it
-//   Enter or Save button ..... save highlighted sections (original is unchanged)
+//   Enter or Save button ..... save highlighted sections, or all sections when
+//                              none are highlighted (original is unchanged)
 //   Esc, T or Trim button .... exit trim mode
 //
 // Uses globals from renderer.js: images, currentIndex, imageEl, filenameEl,
@@ -79,6 +80,15 @@
         return sections().filter(s => picks.some(p => contains(s, p)));
     }
 
+    // What Save writes: the highlighted sections, or all of them when none are
+    // highlighted. With no lines there's only the whole image: nothing to save.
+    function sectionsToSave() {
+        const chosen = selectedSections();
+        if (chosen.length > 0) return { list: chosen, all: false };
+        if (vLines.length === 0 && hLines.length === 0) return { list: [], all: false };
+        return { list: sections(), all: true };
+    }
+
     // Line near a screen point, or null
     function lineAt(p) {
         const r = canvas.getBoundingClientRect();
@@ -149,9 +159,11 @@
     }
 
     function updateControls() {
-        const count = selectedSections().length;
-        saveBtn.textContent = count > 0 ? `💾 Save ${count} section${count === 1 ? '' : 's'}` : '💾 Save';
-        saveBtn.disabled = count === 0 || saving;
+        const { list, all } = sectionsToSave();
+        const n = list.length;
+        const noun = `section${n === 1 ? '' : 's'}`;
+        saveBtn.textContent = n === 0 ? '💾 Save' : all ? `💾 Save all ${n} ${noun}` : `💾 Save ${n} ${noun}`;
+        saveBtn.disabled = n === 0 || saving;
     }
 
     // ---- mode on/off ----------------------------------------------------
@@ -297,7 +309,7 @@
 
     async function save() {
         if (!active || saving) return;
-        const chosen = selectedSections();
+        const chosen = sectionsToSave().list;
         if (chosen.length === 0) return;
 
         saving = true;
