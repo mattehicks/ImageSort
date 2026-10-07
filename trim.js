@@ -9,7 +9,7 @@
 //   Enter or Save button ..... save highlighted sections, or all sections when
 //                              none are highlighted (original is unchanged);
 //                              a successful save exits trim mode
-//   Esc, T or Trim button .... exit trim mode
+//   Esc or Trim button ....... exit trim mode
 //
 // Uses globals from renderer.js: images, currentIndex, imageEl, filenameEl,
 // flashStatus, reportFailure, ipcRenderer.
@@ -368,18 +368,11 @@
     // Capture phase on window runs before renderer.js's document handler:
     // in trim mode only trim keys work, so nothing gets moved/deleted by accident.
     window.addEventListener('keydown', (e) => {
+        if (!active) return;
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-        if (!active) {
-            if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.altKey && !e.metaKey) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                enter();
-            }
-            return;
-        }
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (e.key === 'Escape' || e.key === 't' || e.key === 'T') exit();
+        if (e.key === 'Escape') exit();
         else if (e.key === 'Enter') save();
     }, true);
 

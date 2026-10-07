@@ -640,7 +640,7 @@ function updateQuickFolderPanel() {
         const delBtn = document.querySelector(`.qf-delete[data-key="${key}"]`);
         if (delBtn) {
             delBtn.classList.toggle('active', isDelete);
-            delBtn.textContent = isDelete ? '✓ Delete' : 'Delete';
+            delBtn.textContent = 'Delete';
         }
     });
 }
