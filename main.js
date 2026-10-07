@@ -135,7 +135,8 @@ async function readRegistryConfig(regKey = REG_KEY) {
       config.destinationFolders[id] = {
         name: section.values.Name || '',
         path: section.values.Path || '',
-        key: section.values.Key || id
+        key: section.values.Key || id,
+        action: section.values.Action === 'delete' ? 'delete' : 'move'
       };
     }
     if (Object.keys(config.destinationFolders).length === 0) {
@@ -168,6 +169,7 @@ async function writeRegistryConfig(config) {
       `"Name"="${regEscape(dest.name)}"`,
       `"Path"="${regEscape(dest.path)}"`,
       `"Key"="${regEscape(dest.key)}"`,
+      `"Action"="${dest.action === 'delete' ? 'delete' : 'move'}"`,
       ''
     );
   }

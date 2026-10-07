@@ -222,7 +222,9 @@ sortDirBtn.addEventListener('click', () => {
 // Folders the scan never enters: destination folders and a custom skipped folder
 function scanExcludeFolders() {
     if (!config) return [];
-    const list = Object.values(config.destinationFolders || {}).map(d => d.path).filter(Boolean);
+    const list = Object.values(config.destinationFolders || {})
+        .filter(d => d.action !== 'delete')
+        .map(d => d.path).filter(Boolean);
     if (config.skippedFolder) list.push(config.skippedFolder);
     return list;
 }
@@ -437,10 +439,13 @@ function updateShortcutDisplay() {
     Object.entries(config.destinationFolders).forEach(([key, folder]) => {
         const shortcutDiv = document.createElement('div');
         shortcutDiv.className = 'shortcut';
+        const label = folder.action === 'delete' ? '🗑 Delete (Recycle Bin)' : (folder.name || 'Not set');
         shortcutDiv.innerHTML = `
-            <span class="key">${folder.key}</span>
-            <span class="label">→ ${folder.name}</span>
+            <span class="key"></span>
+            <span class="label"></span>
         `;
+        shortcutDiv.querySelector('.key').textContent = folder.key;
+        shortcutDiv.querySelector('.label').textContent = `→ ${label}`;
         shortcutKeysEl.appendChild(shortcutDiv);
     });
 }
@@ -456,14 +461,13 @@ document.addEventListener('keydown', (e) => {
         // With auto-move on, a held-down arrow key must not sweep images into skipped
         if (e.repeat && config && config.autoMoveSkipped) return;
         if (e.key === 'ArrowRight') nextImage(); else previousImage();
-    } else if (e.key === 'x' || e.key === 'X') {
-        deleteCurrentImage();
     } else if (config && config.destinationFolders) {
-        // Folder keys move the image; Shift + folder key copies it
+        // Folder keys move the image (or delete it, for a key set to Delete);
+        // Shift + folder key copies it
         if (e.shiftKey) {
             const pressed = physicalKey(e);
             Object.entries(config.destinationFolders).forEach(([key, folder]) => {
-                if (folder.key && pressed === folder.key.toLowerCase()) {
+                if (folder.key && pressed === folder.key.toLowerCase() && folder.action !== 'delete') {
                     copyToFolder(key);
                 }
             });
@@ -471,7 +475,8 @@ document.addEventListener('keydown', (e) => {
         }
         Object.entries(config.destinationFolders).forEach(([key, folder]) => {
             if (e.key === folder.key) {
-                moveToFolder(key);
+                if (folder.action === 'delete') deleteCurrentImage();
+                else moveToFolder(key);
             }
         });
     }
@@ -538,6 +543,7 @@ document.querySelectorAll('.qf-select').forEach(btn => {
             const folderName = folder.split('\\').pop() || folder.split('/').pop();
             config.destinationFolders[key].path = folder;
             config.destinationFolders[key].name = folderName;
+            config.destinationFolders[key].action = 'move'; // picking a folder makes it a move key again
             await ipcRenderer.invoke('save-config', config);
             updateQuickFolderPanel();
             updateShortcutDisplay();
@@ -545,13 +551,33 @@ document.querySelectorAll('.qf-select').forEach(btn => {
     });
 });
 
+// Delete toggle: the key sends the image to the Recycle Bin instead of moving it
+document.querySelectorAll('.qf-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+        e.target.blur();
+        const key = e.target.dataset.key;
+        const dest = config && config.destinationFolders[key];
+        if (!dest) return;
+        dest.action = dest.action === 'delete' ? 'move' : 'delete';
+        await ipcRenderer.invoke('save-config', config);
+        updateQuickFolderPanel();
+        updateShortcutDisplay();
+    });
+});
+
 function updateQuickFolderPanel() {
     if (!config || !config.destinationFolders) return;
     
     Object.entries(config.destinationFolders).forEach(([key, folder]) => {
+        const isDelete = folder.action === 'delete';
         const nameEl = document.getElementById(`qf-name-${key}`);
         if (nameEl) {
-            nameEl.textContent = folder.name || 'Not set';
+            nameEl.textContent = isDelete ? '🗑 Delete (Recycle Bin)' : (folder.name || 'Not set');
+        }
+        const delBtn = document.querySelector(`.qf-delete[data-key="${key}"]`);
+        if (delBtn) {
+            delBtn.classList.toggle('active', isDelete);
+            delBtn.textContent = isDelete ? '✓ Delete' : 'Delete';
         }
     });
 }
@@ -629,6 +655,7 @@ async function saveConfig() {
         newConfig.destinationFolders[key] = {
             name: name,
             path: pathValue,
+            action: (config && config.destinationFolders[key] && config.destinationFolders[key].action) || 'move',
             key: keyValue
         };
     });

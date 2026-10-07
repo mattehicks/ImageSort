@@ -270,6 +270,16 @@
             font-size: 11px;
         }
 
+        .quick-folder-item .qf-delete {
+            background: #444;
+            margin-left: 4px;
+        }
+
+        .quick-folder-item .qf-delete.active {
+            background: #9c2a2a;
+            color: #fff;
+        }
+
         .quick-folder-close {
             margin-top: 5px;
             padding: 5px 10px;
@@ -396,7 +406,7 @@
                 </select>
                 <button id="sort-dir-btn" title="Toggle ascending/descending">↑ Asc</button>
             </div>
-            <label id="auto-move-label" title="When you move off an image without sorting it (1/2/3) or deleting it (X), move it to the skipped folder (Settings > Skipped folder location)">
+            <label id="auto-move-label" title="When you move off an image without sorting it, copying it or deleting it with a folder key (1/2/3), move it to the skipped folder (Settings > Skipped folder location)">
                 <input type="checkbox" id="auto-move-skipped">
                 Auto-move skipped
             </label>
@@ -431,10 +441,6 @@
             <span class="key">→</span>
             <span class="label">Next</span>
         </div>
-        <div class="shortcut">
-            <span class="key">X</span>
-            <span class="label">Delete</span>
-        </div>
         <div id="shortcut-keys"></div>
         <div class="shortcut">
             <span class="key">Shift</span>
@@ -452,16 +458,19 @@
             <span class="key">1</span>
             <span class="folder-name" id="qf-name-1">Not set</span>
             <button class="qf-select" data-key="1">Set</button>
+            <button class="qf-delete" data-key="1" title="Make this key send the image to the Recycle Bin">Delete</button>
         </div>
         <div class="quick-folder-item">
             <span class="key">2</span>
             <span class="folder-name" id="qf-name-2">Not set</span>
             <button class="qf-select" data-key="2">Set</button>
+            <button class="qf-delete" data-key="2" title="Make this key send the image to the Recycle Bin">Delete</button>
         </div>
         <div class="quick-folder-item">
             <span class="key">3</span>
             <span class="folder-name" id="qf-name-3">Not set</span>
             <button class="qf-select" data-key="3">Set</button>
+            <button class="qf-delete" data-key="3" title="Make this key send the image to the Recycle Bin">Delete</button>
         </div>
         <button class="quick-folder-close" id="qf-close">Done</button>
     </div>
