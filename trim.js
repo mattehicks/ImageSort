@@ -7,7 +7,8 @@
 //   Right-click a line ....... remove it
 //   Click a section .......... highlight / unhighlight it
 //   Enter or Save button ..... save highlighted sections, or all sections when
-//                              none are highlighted (original is unchanged)
+//                              none are highlighted (original is unchanged);
+//                              a successful save exits trim mode
 //   Esc, T or Trim button .... exit trim mode
 //
 // Uses globals from renderer.js: images, currentIndex, imageEl, filenameEl,
@@ -340,8 +341,8 @@
                 reportFailure('Trim save', result, { name: pathTrim.basename(sourcePath) });
                 return;
             }
-            picks = [];
-            if (active) draw();
+            // Saved: leave trim mode so arrows / folder keys work again
+            exit();
             const names = result.saved.map(p => pathTrim.basename(p)).join(', ');
             flashStatus(`Saved ${result.saved.length} section${result.saved.length === 1 ? '' : 's'}`, names, 'ok');
         } catch (err) {
