@@ -13,7 +13,6 @@ const configPanel = document.getElementById('config-panel');
 const noImageMsg = document.getElementById('no-image-msg');
 const shortcutKeysEl = document.getElementById('shortcut-keys');
 const shortcutsPanel = document.getElementById('shortcuts');
-const quickFolderPanel = document.getElementById('quick-folder-panel');
 const sortSelect = document.getElementById('sort-select');
 const sortDirBtn = document.getElementById('sort-dir-btn');
 const autoMoveCheckbox = document.getElementById('auto-move-skipped');
@@ -498,15 +497,21 @@ function updateShortcutDisplay() {
     shortcutKeysEl.innerHTML = '';
     
     Object.entries(config.destinationFolders).forEach(([key, folder]) => {
+        const isDelete = folder.action === 'delete';
         const shortcutDiv = document.createElement('div');
-        shortcutDiv.className = 'shortcut';
-        const label = folder.action === 'delete' ? 'Delete' : (folder.name || 'Not set');
+        shortcutDiv.className = 'shortcut dest-row';
         shortcutDiv.innerHTML = `
             <span class="key"></span>
             <span class="label"></span>
+            <button class="dest-btn dest-set">Set</button>
+            <button class="dest-btn dest-delete">Delete</button>
         `;
         shortcutDiv.querySelector('.key').textContent = folder.key;
-        shortcutDiv.querySelector('.label').textContent = `→ ${label}`;
+        const labelEl = shortcutDiv.querySelector('.label');
+        labelEl.textContent = isDelete ? 'Delete' : (folder.name || 'Not set');
+        if (!isDelete && folder.path) labelEl.title = folder.path;
+        shortcutDiv.querySelectorAll('button').forEach(b => { b.dataset.key = key; });
+        shortcutDiv.querySelector('.dest-delete').classList.toggle('active', isDelete);
         shortcutKeysEl.appendChild(shortcutDiv);
     });
 }
@@ -589,61 +594,29 @@ document.getElementById('toggle-shortcuts-btn').addEventListener('click', () => 
     shortcutsPanel.classList.toggle('hidden');
 });
 
-document.getElementById('quick-folder-btn').addEventListener('click', () => {
-    updateQuickFolderPanel();
-    quickFolderPanel.classList.add('active');
-});
+// Set / Delete buttons on the folder rows of the Shortcuts panel
+shortcutKeysEl.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-key]');
+    if (!btn || !config) return;
+    btn.blur();
+    const dest = config.destinationFolders[btn.dataset.key];
+    if (!dest) return;
 
-document.getElementById('qf-close').addEventListener('click', () => {
-    quickFolderPanel.classList.remove('active');
-});
-
-document.querySelectorAll('.qf-select').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        const key = e.target.dataset.key;
+    if (btn.classList.contains('dest-set')) {
         const folder = await ipcRenderer.invoke('select-folder');
-        if (folder) {
-            const folderName = folder.split('\\').pop() || folder.split('/').pop();
-            config.destinationFolders[key].path = folder;
-            config.destinationFolders[key].name = folderName;
-            config.destinationFolders[key].action = 'move'; // picking a folder makes it a move key again
-            await ipcRenderer.invoke('save-config', config);
-            updateQuickFolderPanel();
-            updateShortcutDisplay();
-        }
-    });
-});
-
-// Delete toggle: the key sends the image to the Recycle Bin instead of moving it
-document.querySelectorAll('.qf-delete').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-        e.target.blur();
-        const key = e.target.dataset.key;
-        const dest = config && config.destinationFolders[key];
-        if (!dest) return;
+        if (!folder) return;
+        dest.path = folder;
+        dest.name = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
+        dest.action = 'move'; // picking a folder makes it a move key again
+    } else if (btn.classList.contains('dest-delete')) {
+        // The key sends the image to the Recycle Bin instead of moving it
         dest.action = dest.action === 'delete' ? 'move' : 'delete';
-        await ipcRenderer.invoke('save-config', config);
-        updateQuickFolderPanel();
-        updateShortcutDisplay();
-    });
+    } else {
+        return;
+    }
+    await ipcRenderer.invoke('save-config', config);
+    updateShortcutDisplay();
 });
-
-function updateQuickFolderPanel() {
-    if (!config || !config.destinationFolders) return;
-    
-    Object.entries(config.destinationFolders).forEach(([key, folder]) => {
-        const isDelete = folder.action === 'delete';
-        const nameEl = document.getElementById(`qf-name-${key}`);
-        if (nameEl) {
-            nameEl.textContent = isDelete ? 'Delete' : (folder.name || 'Not set');
-        }
-        const delBtn = document.querySelector(`.qf-delete[data-key="${key}"]`);
-        if (delBtn) {
-            delBtn.classList.toggle('active', isDelete);
-            delBtn.textContent = 'Delete';
-        }
-    });
-}
 
 function openConfigPanel() {
     if (!config) return;

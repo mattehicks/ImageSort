@@ -206,84 +206,23 @@
             text-decoration: underline;
         }
 
-        #quick-folder-btn {
-            position: absolute;
-            top: 5px;
-            right: 10px;
-            color: #888;
-            text-decoration: none;
-            font-size: 11px;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        #quick-folder-btn:hover {
-            color: #fff;
-            text-decoration: underline;
-        }
-
-        #quick-folder-panel {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(45, 45, 45, 0.98);
-            padding: 15px;
-            border-radius: 8px;
-            display: none;
-            flex-direction: column;
-            gap: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            min-width: 250px;
-        }
-
-        #quick-folder-panel.active {
-            display: flex;
-        }
-
-        #quick-folder-panel h3 {
-            margin: 0 0 8px 0;
-            font-size: 13px;
-            color: #ccc;
-        }
-
-        .quick-folder-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-        }
-
-        .quick-folder-item .key {
-            min-width: 20px;
-        }
-
-        .quick-folder-item .folder-name {
+        .dest-row .label {
             flex: 1;
-            color: #aaa;
+            max-width: 220px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        .quick-folder-item button {
-            padding: 3px 8px;
+        .shortcut .dest-btn {
+            padding: 2px 8px;
             font-size: 11px;
-        }
-
-        .quick-folder-item .qf-delete {
             background: #444;
-            margin-left: 4px;
         }
 
-        .quick-folder-item .qf-delete.active {
+        .shortcut .dest-delete.active {
             background: #9c2a2a;
             color: #fff;
-        }
-
-        .quick-folder-close {
-            margin-top: 5px;
-            padding: 5px 10px;
-            font-size: 11px;
         }
 
         .shortcut {
@@ -432,7 +371,6 @@
 
     <div id="shortcuts">
         <a id="shortcuts-close">close</a>
-        <a id="quick-folder-btn">folders</a>
         <div class="shortcut">
             <span class="key">←</span>
             <span class="label">Previous</span>
@@ -446,33 +384,6 @@
             <span class="key">Shift</span>
             <span class="label">+ folder key → copy instead of move</span>
         </div>
-        <div class="shortcut">
-            <span class="key">U</span>
-            <span class="label">Undo</span>
-        </div>
-    </div>
-
-    <div id="quick-folder-panel">
-        <h3>Assign Folders</h3>
-        <div class="quick-folder-item">
-            <span class="key">1</span>
-            <span class="folder-name" id="qf-name-1">Not set</span>
-            <button class="qf-select" data-key="1">Set</button>
-            <button class="qf-delete" data-key="1" title="Make this key send the image to the Recycle Bin">Delete</button>
-        </div>
-        <div class="quick-folder-item">
-            <span class="key">2</span>
-            <span class="folder-name" id="qf-name-2">Not set</span>
-            <button class="qf-select" data-key="2">Set</button>
-            <button class="qf-delete" data-key="2" title="Make this key send the image to the Recycle Bin">Delete</button>
-        </div>
-        <div class="quick-folder-item">
-            <span class="key">3</span>
-            <span class="folder-name" id="qf-name-3">Not set</span>
-            <button class="qf-select" data-key="3">Set</button>
-            <button class="qf-delete" data-key="3" title="Make this key send the image to the Recycle Bin">Delete</button>
-        </div>
-        <button class="quick-folder-close" id="qf-close">Done</button>
     </div>
 
     <div id="config-panel">
