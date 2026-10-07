@@ -500,7 +500,7 @@ function updateShortcutDisplay() {
     Object.entries(config.destinationFolders).forEach(([key, folder]) => {
         const shortcutDiv = document.createElement('div');
         shortcutDiv.className = 'shortcut';
-        const label = folder.action === 'delete' ? '🗑 Delete (Recycle Bin)' : (folder.name || 'Not set');
+        const label = folder.action === 'delete' ? 'Delete' : (folder.name || 'Not set');
         shortcutDiv.innerHTML = `
             <span class="key"></span>
             <span class="label"></span>
@@ -635,7 +635,7 @@ function updateQuickFolderPanel() {
         const isDelete = folder.action === 'delete';
         const nameEl = document.getElementById(`qf-name-${key}`);
         if (nameEl) {
-            nameEl.textContent = isDelete ? '🗑 Delete (Recycle Bin)' : (folder.name || 'Not set');
+            nameEl.textContent = isDelete ? 'Delete' : (folder.name || 'Not set');
         }
         const delBtn = document.querySelector(`.qf-delete[data-key="${key}"]`);
         if (delBtn) {
