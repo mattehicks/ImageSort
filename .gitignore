@@ -28,3 +28,6 @@ yarn.lock
 
 # Electron builder
 *.blockmap
+
+# Trim-mode branch build output
+dist-trim/

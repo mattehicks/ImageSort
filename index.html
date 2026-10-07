@@ -133,6 +133,43 @@
             user-select: none;
         }
 
+        #trim-canvas {
+            position: absolute;
+            display: none;
+            cursor: crosshair;
+            z-index: 5;
+        }
+
+        #trim-hint {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: #ddd;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 6;
+        }
+
+        body.trim-active #trim-btn {
+            background: #b8860b;
+        }
+
+        #trim-save-btn:disabled {
+            background: #3e3e3e;
+            color: #888;
+            cursor: default;
+        }
+
+        #filename.status-ok {
+            color: #6bd38a;
+            font-weight: bold;
+        }
+
         #shortcuts {
             position: absolute;
             bottom: 20px;
@@ -364,6 +401,8 @@
                 Auto-move skipped
             </label>
             <button id="settings-btn" title="Settings">⚙ Settings</button>
+            <button id="trim-btn" title="Trim mode (T): split the image with lines and save sections">✂ Trim</button>
+            <button id="trim-save-btn" title="Save highlighted sections (Enter)" style="display: none;" disabled>💾 Save</button>
         </div>
         <div id="info">
             <span id="image-counter">0 / 0</span>
@@ -374,6 +413,7 @@
 
     <div id="viewer-container">
         <img id="image" alt="No image selected">
+        <div id="trim-hint" style="display: none;">Drag to add a line · drag a line to move it (off the image or right-click to remove) · click sections to highlight · Enter to save · Esc to exit</div>
         <div class="no-image" id="no-image-msg">
             <h2>No images found</h2>
             <p>Click Settings to configure your image folder</p>
@@ -399,6 +439,10 @@
         <div class="shortcut">
             <span class="key">Shift</span>
             <span class="label">+ folder key → copy instead of move</span>
+        </div>
+        <div class="shortcut">
+            <span class="key">T</span>
+            <span class="label">Trim mode</span>
         </div>
     </div>
 
@@ -443,5 +487,6 @@
     </div>
 
     <script src="renderer.js"></script>
+    <script src="trim.js"></script>
 </body>
 </html>

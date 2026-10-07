@@ -136,15 +136,16 @@ function clearStatus() {
         clearTimeout(statusTimer);
         statusTimer = null;
     }
-    filenameEl.classList.remove('status-error');
+    filenameEl.classList.remove('status-error', 'status-ok');
     filenameEl.title = '';
 }
 
-function flashStatus(text, detail) {
+// kind: 'error' (red) or 'ok' (green)
+function flashStatus(text, detail, kind = 'error') {
     clearStatus();
     filenameEl.textContent = text;
     filenameEl.title = detail || '';
-    filenameEl.classList.add('status-error');
+    filenameEl.classList.add(kind === 'ok' ? 'status-ok' : 'status-error');
     statusTimer = setTimeout(() => {
         clearStatus();
         if (processingCount === 0) refreshFilename();

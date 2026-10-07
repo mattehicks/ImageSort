@@ -503,6 +503,42 @@ ipcMain.handle('show-settings-menu', (event, opts) => {
   });
 });
 
+// Trim mode: write cropped sections next to the original as
+// "<name>_trim<N><ext>", N continuing after any existing _trim files.
+// sections: [{ data: Uint8Array, ext: '.png' | '.jpg' | ... }]
+ipcMain.handle('save-trim-sections', (event, sourcePath, sections) => queueFileOp(async () => {
+  try {
+    const dir = path.dirname(sourcePath);
+    const base = path.basename(sourcePath, path.extname(sourcePath));
+    const prefix = (base + '_trim').toLowerCase();
+
+    // Highest existing _trimN for this image, any extension
+    let n = 0;
+    for (const entry of await fs.readdir(dir)) {
+      const stem = path.basename(entry, path.extname(entry)).toLowerCase();
+      if (stem.startsWith(prefix)) {
+        const num = Number(stem.slice(prefix.length));
+        if (Number.isInteger(num) && num > n) n = num;
+      }
+    }
+
+    const saved = [];
+    for (const section of sections) {
+      let target;
+      do {
+        n++;
+        target = path.join(dir, `${base}_trim${n}${section.ext}`);
+      } while (fsSync.existsSync(target));
+      await fs.writeFile(target, Buffer.from(section.data), { flag: 'wx' }); // never overwrite
+      saved.push(target);
+    }
+    return { success: true, saved };
+  } catch (error) {
+    console.error('Error saving trim sections:', error);
+    return { success: false, error: error.message };
+  }
+}));
+
 // Copy into destFolder. Identical file already there: nothing written, counts
 // as done. Different file with the same name: saved as "name (n).ext".
 ipcMain.handle('copy-file', (event, sourcePath, destFolder) => queueFileOp(async () => {
