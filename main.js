@@ -422,15 +422,19 @@ async function moveFileTo(sourcePath, destPath) {
 // saved as "name (n).ext".
 async function moveIntoFolder(sourcePath, destFolder) {
   await fs.mkdir(destFolder, { recursive: true });
+  const srcStat = await fs.stat(sourcePath);
+  const sourceTimes = { atimeMs: srcStat.atimeMs, mtimeMs: srcStat.mtimeMs }; // for undo
   const { destPath, identical } = await resolveDestination(sourcePath, destFolder);
   if (identical) {
+    const destStat = await fs.stat(destPath);
+    const destTimes = { atimeMs: destStat.atimeMs, mtimeMs: destStat.mtimeMs };
     await shell.trashItem(sourcePath);
     await touchModified(destPath);
-    return { success: true, duplicate: true, newPath: destPath };
+    return { success: true, duplicate: true, newPath: destPath, sourcePath, sourceTimes, destTimes };
   }
   await moveFileTo(sourcePath, destPath);
   await touchModified(destPath);
-  return { success: true, newPath: destPath, renamed: path.basename(destPath) !== path.basename(sourcePath) };
+  return { success: true, newPath: destPath, sourcePath, sourceTimes, renamed: path.basename(destPath) !== path.basename(sourcePath) };
 }
 
 // Move a viewed-but-unsorted image to the skipped folder: skippedFolder when
@@ -626,12 +630,83 @@ ipcMain.handle('select-folder', async () => {
   return null;
 });
 
-ipcMain.handle('delete-file', async (event, filePath) => {
+// ---- Delete + undo ----------------------------------------------------------
+
+// Deleted images are kept here so U can restore them (the Recycle Bin can't be
+// restored from reliably). Cleared at startup and on quit.
+const UNDO_CACHE_DIR = path.join(os.tmpdir(), 'd20-image-viewer-undo');
+function clearUndoCache() {
+  try { fsSync.rmSync(UNDO_CACHE_DIR, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+}
+clearUndoCache();
+app.on('will-quit', clearUndoCache);
+
+ipcMain.handle('delete-file', (event, filePath) => queueFileOp(async () => {
   try {
+    const stat = await fs.stat(filePath);
+    await fs.mkdir(UNDO_CACHE_DIR, { recursive: true });
+    const cachePath = path.join(UNDO_CACHE_DIR,
+      `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${path.basename(filePath)}`);
+    await fs.copyFile(filePath, cachePath);
     await shell.trashItem(filePath);
-    return { success: true };
+    return { success: true, sourcePath: filePath, cachePath, sourceTimes: { atimeMs: stat.atimeMs, mtimeMs: stat.mtimeMs } };
   } catch (error) {
     console.error('Error deleting file:', error);
     return { success: false, error: error.message };
   }
-});
+}));
+
+async function restoreTimes(filePath, times) {
+  if (!times) return;
+  try {
+    await fs.utimes(filePath, new Date(times.atimeMs), new Date(times.mtimeMs));
+  } catch (err) {
+    console.error('Could not restore dates:', filePath, err);
+  }
+}
+
+// Undo one recorded operation. op = { kind: 'move'|'copy'|'delete', result }
+// where result is what the original operation returned.
+ipcMain.handle('undo-op', (event, op) => queueFileOp(async () => {
+  const r = op && op.result;
+  if (!r || !r.success) return { success: false, error: 'Nothing to undo' };
+  try {
+    if (op.kind === 'move') {
+      // Folder-key move or auto-move to skipped: put the file back
+      if (fsSync.existsSync(r.sourcePath)) {
+        return { success: false, alreadyExists: true, error: 'A file is already at the original location' };
+      }
+      await fs.mkdir(path.dirname(r.sourcePath), { recursive: true });
+      if (r.duplicate) {
+        // The source went to the Recycle Bin because an identical file was
+        // already in the folder: recreate it from that file, leave that file
+        await fs.copyFile(r.newPath, r.sourcePath, fsSync.constants.COPYFILE_EXCL);
+        await restoreTimes(r.newPath, r.destTimes);
+      } else {
+        await moveFileTo(r.newPath, r.sourcePath);
+      }
+      await restoreTimes(r.sourcePath, r.sourceTimes);
+      return { success: true, restoredPath: r.sourcePath };
+    }
+    if (op.kind === 'copy') {
+      // Remove the copy (to the Recycle Bin); an identical file that was
+      // already there is left alone
+      if (!r.duplicate && fsSync.existsSync(r.newPath)) await shell.trashItem(r.newPath);
+      return { success: true };
+    }
+    if (op.kind === 'delete') {
+      if (fsSync.existsSync(r.sourcePath)) {
+        return { success: false, alreadyExists: true, error: 'A file is already at the original location' };
+      }
+      await fs.mkdir(path.dirname(r.sourcePath), { recursive: true });
+      await fs.copyFile(r.cachePath, r.sourcePath, fsSync.constants.COPYFILE_EXCL);
+      await restoreTimes(r.sourcePath, r.sourceTimes);
+      await fs.unlink(r.cachePath).catch(() => {});
+      return { success: true, restoredPath: r.sourcePath };
+    }
+    return { success: false, error: 'Unknown operation' };
+  } catch (error) {
+    console.error('Error undoing:', error);
+    return { success: false, error: error.message };
+  }
+}));

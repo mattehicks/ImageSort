@@ -351,7 +351,9 @@ async function navigate(step) {
         !images[currentIndex].copied && !browsingSkippedFolder()) {
         const taken = takeCurrent();
         showAfterRemoval(taken.idx, step);
-        const result = await ipcRenderer.invoke('move-to-skipped', taken.img.path, config.sourceFolder, config.skippedFolder || '');
+        const pending = ipcRenderer.invoke('move-to-skipped', taken.img.path, config.sourceFolder, config.skippedFolder || '');
+        recordUndo('move', 'skip', pending, taken);
+        const result = await pending;
         if (!result.success) {
             restoreImage(taken);
             if (!result.noop) reportFailure('Skip', result, taken.img);
@@ -382,7 +384,9 @@ async function copyToFolder(destKey) {
     const img = images[currentIndex];
     const wasCopied = !!img.copied;
     img.copied = true; // exempt from auto-move skipped
-    const result = await ipcRenderer.invoke('copy-file', img.path, destination.path);
+    const pending = ipcRenderer.invoke('copy-file', img.path, destination.path);
+    recordUndo('copy', 'copy', pending, { img, wasCopied });
+    const result = await pending;
     if (!result.success) {
         img.copied = wasCopied;
         reportFailure('Copy', result, img);
@@ -399,7 +403,9 @@ async function moveToFolder(destKey) {
 
     const taken = takeCurrent();
     showAfterRemoval(taken.idx, 0);
-    const result = await ipcRenderer.invoke('move-file', taken.img.path, destination.path);
+    const pending = ipcRenderer.invoke('move-file', taken.img.path, destination.path);
+    recordUndo('move', 'move', pending, taken);
+    const result = await pending;
     if (!result.success) {
         restoreImage(taken);
         reportFailure('Move', result, taken.img);
@@ -410,12 +416,18 @@ async function deleteCurrentImage() {
     if (images.length === 0 || busy) return;
     
     busy = true;
-    const currentImage = images[currentIndex].path;
-    const result = await ipcRenderer.invoke('delete-file', currentImage).finally(() => { busy = false; });
+    const img = images[currentIndex];
+    const ctx = { img, idx: currentIndex, gen: loadGeneration };
+    const pending = ipcRenderer.invoke('delete-file', img.path);
+    recordUndo('delete', 'delete', pending, ctx);
+    const result = await pending.finally(() => { busy = false; });
     
     if (result.success) {
-        // Remove from current list
-        images.splice(currentIndex, 1);
+        // Remove from current list (by identity; the list may have shifted)
+        const idx = images.indexOf(img);
+        if (idx < 0) return;
+        images.splice(idx, 1);
+        ctx.idx = idx;
         
         // Adjust index
         if (images.length === 0) {
@@ -427,7 +439,56 @@ async function deleteCurrentImage() {
             displayImage();
         }
     } else {
-        reportFailure('Delete', result);
+        reportFailure('Delete', result, img);
+    }
+}
+
+// ---- Undo (U) ---------------------------------------------------------------
+// Each move / skip / copy / delete is recorded with the promise of its result,
+// so U works even while the operation is still finishing in the background.
+const UNDO_LIMIT = 50;
+const undoStack = [];
+let undoing = false;
+
+function recordUndo(kind, label, resultPromise, ctx) {
+    // Keep ctx itself (not a copy) so later corrections to ctx.idx apply
+    undoStack.push(Object.assign(ctx, { kind, label, resultPromise }));
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+}
+
+async function undoLast() {
+    if (undoing) return;
+    undoing = true;
+    try {
+        // Skip entries whose operation failed (those already put themselves back)
+        let entry, result;
+        while ((entry = undoStack.pop())) {
+            result = await entry.resultPromise;
+            if (result && result.success) break;
+        }
+        if (!entry) {
+            flashStatus('Nothing to undo');
+            return;
+        }
+
+        const r = await ipcRenderer.invoke('undo-op', { kind: entry.kind, result });
+        if (!r.success) {
+            reportFailure('Undo', r, entry.img);
+            return;
+        }
+
+        if (entry.kind === 'copy') {
+            entry.img.copied = entry.wasCopied;
+        } else if (entry.gen === loadGeneration && !images.includes(entry.img)) {
+            // Put the image back where it was and show it
+            const at = Math.min(entry.idx, images.length);
+            images.splice(at, 0, entry.img);
+            currentIndex = at;
+            displayImage();
+        }
+        flashStatus(`Undone: ${entry.label}`, entry.img.name, 'ok');
+    } finally {
+        undoing = false;
     }
 }
 
@@ -461,6 +522,8 @@ document.addEventListener('keydown', (e) => {
         // With auto-move on, a held-down arrow key must not sweep images into skipped
         if (e.repeat && config && config.autoMoveSkipped) return;
         if (e.key === 'ArrowRight') nextImage(); else previousImage();
+    } else if ((e.key === 'u' || e.key === 'U') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        undoLast();
     } else if (config && config.destinationFolders) {
         // Folder keys move the image (or delete it, for a key set to Delete);
         // Shift + folder key copies it
