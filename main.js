@@ -630,6 +630,16 @@ ipcMain.handle('select-folder', async () => {
   return null;
 });
 
+// Esc: close right away. The window hides immediately; queued background
+// moves/copies finish before the process exits so no file is left half-done.
+ipcMain.handle('quit-app', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+  try {
+    await fileOpQueue;
+  } catch (e) { /* ignore */ }
+  app.quit();
+});
+
 // ---- Delete + undo ----------------------------------------------------------
 
 // Deleted images are kept here so U can restore them (the Recycle Bin can't be

@@ -523,7 +523,11 @@ document.addEventListener('keydown', (e) => {
     // Don't handle keys while a form control (e.g. sort dropdown) has focus
     if (['SELECT', 'INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    if (e.key === 'Escape') {
+        // Close the app (in trim mode, trim.js handles Esc first and only leaves trim).
+        // Ignore key repeat so holding Esc to leave trim mode doesn't also quit.
+        if (!e.repeat) ipcRenderer.invoke('quit-app');
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         // With auto-move on, a held-down arrow key must not sweep images into skipped
         if (e.repeat && config && config.autoMoveSkipped) return;
         if (e.key === 'ArrowRight') nextImage(); else previousImage();
