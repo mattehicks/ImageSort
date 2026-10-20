@@ -38,6 +38,10 @@ const DEFAULT_CONFIG = {
 };
 
 const SKIPPED_FOLDER_NAME = 'skipped';
+// Trim/Move puts originals in "<opened folder>\trimmed". Like "skipped",
+// folders with this name are never scanned unless opened directly.
+const TRIMMED_FOLDER_NAME = 'trimmed';
+const UNSCANNED_FOLDER_NAMES = new Set([SKIPPED_FOLDER_NAME, TRIMMED_FOLDER_NAME]);
 
 // Set a file's modified date to now (used after every move/copy, so a folder
 // sorted by date modified shows the order images were categorized in).
@@ -304,9 +308,9 @@ async function collectImages(rootPath, dirPath, recursive, excludeSet, out) {
       continue;
     }
     if (entry.isDirectory()) {
-      // Any folder named "skipped" is left out of the scan. The opened folder
-      // itself is never excluded, so picking a skipped folder directly loads it.
-      if (entry.name.toLowerCase() === SKIPPED_FOLDER_NAME) continue;
+      // Folders named "skipped" or "trimmed" are left out of the scan. The opened
+      // folder itself is never excluded, so picking one directly loads it.
+      if (UNSCANNED_FOLDER_NAMES.has(entry.name.toLowerCase())) continue;
       if (isSystemFolder(dirPath, entry.name)) continue;
       if (recursive && !excludeSet.has(normPath(fullPath))) subdirs.push(fullPath);
     } else if (entry.isFile() && isImage) {
@@ -585,7 +589,7 @@ async function hasScannableSubfolder(dirPath, excludeFolders) {
   return entries.some(entry =>
     entry.isDirectory() &&
     !entry.isSymbolicLink() &&
-    entry.name.toLowerCase() !== SKIPPED_FOLDER_NAME &&
+    !UNSCANNED_FOLDER_NAMES.has(entry.name.toLowerCase()) &&
     !isSystemFolder(dirPath, entry.name) &&
     !excludeSet.has(normPath(path.join(dirPath, entry.name)))
   );

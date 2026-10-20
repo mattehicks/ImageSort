@@ -11,8 +11,12 @@
 //                              a successful save exits trim mode
 //   Esc, T or Trim button .... exit trim mode (T or Trim button also enters)
 //
+//   Trim/Move button ......... same as Save, then moves the original to
+//                              "<opened folder>\trimmed" (U undoes the move)
+//
 // Uses globals from renderer.js: images, currentIndex, imageEl, filenameEl,
-// flashStatus, reportFailure, ipcRenderer.
+// config, flashStatus, reportFailure, ipcRenderer, takeCurrent,
+// showAfterRemoval, restoreImage, recordUndo.
 
 (() => {
     const fsTrim = require('fs');
@@ -21,6 +25,7 @@
     const container = document.getElementById('viewer-container');
     const trimBtn = document.getElementById('trim-btn');
     const saveBtn = document.getElementById('trim-save-btn');
+    const moveBtn = document.getElementById('trim-move-btn');
     const hintEl = document.getElementById('trim-hint');
 
     const canvas = document.createElement('canvas');
@@ -160,11 +165,9 @@
     }
 
     function updateControls() {
-        const { list, all } = sectionsToSave();
-        const n = list.length;
-        const noun = `section${n === 1 ? '' : 's'}`;
-        saveBtn.textContent = n === 0 ? '💾 Save' : all ? `💾 Save all ${n} ${noun}` : `💾 Save ${n} ${noun}`;
+        const n = sectionsToSave().list.length;
         saveBtn.disabled = n === 0 || saving;
+        moveBtn.disabled = n === 0 || saving;
     }
 
     // ---- mode on/off ----------------------------------------------------
@@ -182,6 +185,7 @@
         trimBtn.textContent = '✂ Exit trim';
         canvas.style.display = 'block';
         saveBtn.style.display = '';
+        moveBtn.style.display = '';
         hintEl.style.display = '';
         layout();
     }
@@ -196,6 +200,7 @@
         trimBtn.textContent = '✂ Trim';
         canvas.style.display = 'none';
         saveBtn.style.display = 'none';
+        moveBtn.style.display = 'none';
         hintEl.style.display = 'none';
     }
 
@@ -308,7 +313,10 @@
         });
     }
 
-    async function save() {
+    // mode 'save': write the sections, keep the original where it is.
+    // mode 'move': write the sections, then move the original to
+    //              "<opened folder>\trimmed" (undoable with U).
+    async function save(mode = 'save') {
         if (!active || saving) return;
         const chosen = sectionsToSave().list;
         if (chosen.length === 0) return;
@@ -344,12 +352,48 @@
             // Saved: leave trim mode so arrows / folder keys work again
             exit();
             const names = result.saved.map(p => pathTrim.basename(p)).join(', ');
-            flashStatus(`Saved ${result.saved.length} section${result.saved.length === 1 ? '' : 's'}`, names, 'ok');
+            const savedText = `Saved ${result.saved.length} section${result.saved.length === 1 ? '' : 's'}`;
+
+            if (mode === 'move') {
+                moveOriginalToTrimmed(sourcePath, savedText, names);
+            } else {
+                flashStatus(savedText, names, 'ok');
+            }
         } catch (err) {
             reportFailure('Trim save', { error: err.message }, { name: pathTrim.basename(sourcePath) });
         } finally {
             saving = false;
             if (active) updateControls();
+        }
+    }
+
+    // Trim/Move: after the sections are saved, move the original into
+    // "<opened folder>\trimmed" using the normal background move (same
+    // collision handling, recorded for undo). The next image shows right away.
+    async function moveOriginalToTrimmed(sourcePath, savedText, names) {
+        const root = (config && config.sourceFolder) || pathTrim.dirname(sourcePath);
+        // Already browsing a trimmed folder: leave the original where it is
+        if (pathTrim.basename(pathTrim.resolve(root)).toLowerCase() === 'trimmed') {
+            flashStatus(savedText, names, 'ok');
+            return;
+        }
+        const idx = images.findIndex(img => img.path === sourcePath);
+        if (idx < 0) {
+            flashStatus(savedText, names, 'ok');
+            return;
+        }
+
+        currentIndex = idx;
+        const taken = takeCurrent();
+        showAfterRemoval(taken.idx, 0);
+        flashStatus(`${savedText}, original moved to trimmed`, names, 'ok');
+
+        const pending = ipcRenderer.invoke('move-file', sourcePath, pathTrim.join(root, 'trimmed'));
+        recordUndo('move', 'trim move', pending, taken);
+        const result = await pending;
+        if (!result.success) {
+            restoreImage(taken);
+            reportFailure('Move', result, taken.img);
         }
     }
 
@@ -362,7 +406,12 @@
 
     saveBtn.addEventListener('click', () => {
         saveBtn.blur();
-        save();
+        save('save');
+    });
+
+    moveBtn.addEventListener('click', () => {
+        moveBtn.blur();
+        save('move');
     });
 
     // Capture phase on window runs before renderer.js's document handler:

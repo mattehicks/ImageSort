@@ -159,7 +159,8 @@
             background: #b8860b;
         }
 
-        #trim-save-btn:disabled {
+        #trim-save-btn:disabled,
+        #trim-move-btn:disabled {
             background: #3e3e3e;
             color: #888;
             cursor: default;
@@ -351,7 +352,8 @@
             </label>
             <button id="settings-btn" title="Settings">⚙ Settings</button>
             <button id="trim-btn" title="Trim: split the image with lines and save sections">✂ Trim</button>
-            <button id="trim-save-btn" title="Save highlighted sections, or all sections if none are highlighted (Enter)" style="display: none;" disabled>💾 Save</button>
+            <button id="trim-save-btn" title="Save highlighted sections (or all if none); keep the original" style="display: none;" disabled>Trim/Save</button>
+            <button id="trim-move-btn" title="Save highlighted sections (or all if none); move the original to 'trimmed'" style="display: none;" disabled>Trim/Move</button>
         </div>
         <div id="info">
             <span id="image-counter">0 / 0</span>
