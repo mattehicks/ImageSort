@@ -437,7 +437,7 @@ async function deleteCurrentImage() {
             }
             displayImage();
         }
-    } else {
+    } else if (!result.cancelled) { // cancelled = user declined a permanent delete
         reportFailure('Delete', result, img);
     }
 }
@@ -533,6 +533,8 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowRight') nextImage(); else previousImage();
     } else if ((e.key === 'u' || e.key === 'U') && !e.ctrlKey && !e.altKey && !e.metaKey) {
         undoLast();
+    } else if ((e.key === 'Delete' || e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+        if (!e.repeat) deleteCurrentImage();
     } else if (config && config.destinationFolders) {
         // Folder keys move the image (or delete it, for a key set to Delete);
         // Shift + folder key copies it

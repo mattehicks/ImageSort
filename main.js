@@ -432,7 +432,7 @@ async function moveIntoFolder(sourcePath, destFolder) {
   if (identical) {
     const destStat = await fs.stat(destPath);
     const destTimes = { atimeMs: destStat.atimeMs, mtimeMs: destStat.mtimeMs };
-    await shell.trashItem(sourcePath);
+    await removeDuplicate(sourcePath); // identical copy is already in destFolder
     await touchModified(destPath);
     return { success: true, duplicate: true, newPath: destPath, sourcePath, sourceTimes, destTimes };
   }
@@ -655,16 +655,88 @@ function clearUndoCache() {
 clearUndoCache();
 app.on('will-quit', clearUndoCache);
 
+// Removable, network and non-NTFS drives usually have no Recycle Bin; there
+// Electron's trashItem refuses rather than deleting permanently. Results are
+// cached per drive root.
+const recycleBinCheck = new Map();
+function noRecycleBin(filePath) {
+  const root = path.parse(path.resolve(filePath)).root;
+  if (root.startsWith('\\\\')) return Promise.resolve(true); // network share
+  if (!recycleBinCheck.has(root)) {
+    const letter = root[0];
+    recycleBinCheck.set(root, new Promise(resolve => {
+      execFile('powershell.exe', ['-NoProfile', '-Command',
+        `$v = Get-Volume -DriveLetter ${letter}; "$($v.DriveType)|$($v.FileSystem)"`],
+        { windowsHide: true, timeout: 10000 }, (err, stdout) => {
+          if (err) return resolve(false); // unknown: treat as a normal failure
+          const [driveType, fsType] = String(stdout).trim().split('|');
+          resolve(driveType !== 'Fixed' || fsType !== 'NTFS');
+        });
+    }));
+  }
+  return recycleBinCheck.get(root);
+}
+
+// For a file that has an identical copy elsewhere (duplicate move source, a
+// copy being undone): Recycle Bin when possible, otherwise remove it directly.
+// Nothing is lost either way, so no prompt.
+async function removeDuplicate(filePath) {
+  try {
+    await shell.trashItem(filePath);
+  } catch (err) {
+    if (!(await noRecycleBin(filePath))) throw err;
+    await fs.unlink(filePath);
+  }
+}
+
+// Drives the user allowed permanent deletes on ("Don't ask again"), this session only
+const permanentDeleteAllowed = new Set();
+
+async function askPermanentDelete(filePath) {
+  const root = path.parse(path.resolve(filePath)).root;
+  if (permanentDeleteAllowed.has(root.toLowerCase())) return true;
+  const answer = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: 'Delete permanently?',
+    message: `${root} has no Recycle Bin.`,
+    detail: `Delete ${path.basename(filePath)} permanently? U can still undo it while the app is open.`,
+    checkboxLabel: `Don't ask again for ${root} until the app closes`,
+    checkboxChecked: false,
+    buttons: ['Delete permanently', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (answer.response !== 0) return false;
+  if (answer.checkboxChecked) permanentDeleteAllowed.add(root.toLowerCase());
+  return true;
+}
+
 ipcMain.handle('delete-file', (event, filePath) => queueFileOp(async () => {
+  let cachePath = null;
   try {
     const stat = await fs.stat(filePath);
+    const sourceTimes = { atimeMs: stat.atimeMs, mtimeMs: stat.mtimeMs };
     await fs.mkdir(UNDO_CACHE_DIR, { recursive: true });
-    const cachePath = path.join(UNDO_CACHE_DIR,
+    cachePath = path.join(UNDO_CACHE_DIR,
       `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${path.basename(filePath)}`);
     await fs.copyFile(filePath, cachePath);
-    await shell.trashItem(filePath);
-    return { success: true, sourcePath: filePath, cachePath, sourceTimes: { atimeMs: stat.atimeMs, mtimeMs: stat.mtimeMs } };
+
+    try {
+      await shell.trashItem(filePath);
+      return { success: true, sourcePath: filePath, cachePath, sourceTimes };
+    } catch (trashError) {
+      if (!(await noRecycleBin(filePath))) throw trashError;
+      // No Recycle Bin on this drive (e.g. USB stick): delete permanently with permission
+      if (!(await askPermanentDelete(filePath))) {
+        await fs.unlink(cachePath).catch(() => {});
+        return { success: false, cancelled: true };
+      }
+      await fs.unlink(filePath);
+      return { success: true, permanent: true, sourcePath: filePath, cachePath, sourceTimes };
+    }
   } catch (error) {
+    if (cachePath) await fs.unlink(cachePath).catch(() => {});
     console.error('Error deleting file:', error);
     return { success: false, error: error.message };
   }
@@ -705,7 +777,7 @@ ipcMain.handle('undo-op', (event, op) => queueFileOp(async () => {
     if (op.kind === 'copy') {
       // Remove the copy (to the Recycle Bin); an identical file that was
       // already there is left alone
-      if (!r.duplicate && fsSync.existsSync(r.newPath)) await shell.trashItem(r.newPath);
+      if (!r.duplicate && fsSync.existsSync(r.newPath)) await removeDuplicate(r.newPath); // original still exists
       return { success: true };
     }
     if (op.kind === 'delete') {
