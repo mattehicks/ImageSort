@@ -1,6 +1,6 @@
 {
   "name": "d20-image-viewer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Simple image viewer with keyboard navigation and folder shortcuts",
   "main": "main.js",
   "scripts": {
