@@ -26,6 +26,10 @@
     },
     "directories": {
       "output": "dist"
-    }
+    },
+    "files": [
+      "**/*",
+      "!dist-trim${/*}"
+    ]
   }
 }
