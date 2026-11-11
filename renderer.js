@@ -496,7 +496,11 @@ function updateShortcutDisplay() {
     
     shortcutKeysEl.innerHTML = '';
     
-    Object.entries(config.destinationFolders).forEach(([key, folder]) => {
+    // Rows in key order (1-9)
+    const entries = Object.entries(config.destinationFolders)
+        .sort((a, b) => String(a[1].key).localeCompare(String(b[1].key), undefined, { numeric: true }));
+
+    entries.forEach(([key, folder]) => {
         const isDelete = folder.action === 'delete';
         const shortcutDiv = document.createElement('div');
         shortcutDiv.className = 'shortcut dest-row';
@@ -506,6 +510,13 @@ function updateShortcutDisplay() {
             <button class="dest-btn dest-set">Set</button>
             <button class="dest-btn dest-delete">Delete</button>
         `;
+        // Rows 1-3 are permanent; added rows (4-9) can be removed
+        if (!PERMANENT_DEST_IDS.has(key)) {
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'dest-btn dest-remove';
+            removeBtn.textContent = 'Remove';
+            shortcutDiv.appendChild(removeBtn);
+        }
         shortcutDiv.querySelector('.key').textContent = folder.key;
         const labelEl = shortcutDiv.querySelector('.label');
         labelEl.textContent = isDelete ? 'Delete' : (folder.name || 'Not set');
@@ -514,6 +525,24 @@ function updateShortcutDisplay() {
         shortcutDiv.querySelector('.dest-delete').classList.toggle('active', isDelete);
         shortcutKeysEl.appendChild(shortcutDiv);
     });
+
+    // Add another folder key while any of 1-9 is free
+    if (nextFreeDestKey()) {
+        const addRow = document.createElement('div');
+        addRow.className = 'shortcut dest-add-row';
+        addRow.innerHTML = '<button class="dest-btn dest-add">Add</button>';
+        shortcutKeysEl.appendChild(addRow);
+    }
+}
+
+// Folder keys are limited to 1-9
+const DEST_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const PERMANENT_DEST_IDS = new Set(['1', '2', '3']);
+
+function nextFreeDestKey() {
+    if (!config || !config.destinationFolders) return null;
+    const used = new Set(Object.values(config.destinationFolders).map(d => String(d.key)));
+    return DEST_KEYS.find(k => !used.has(k)) || null;
 }
 
 // Keyboard handlers
@@ -600,13 +629,44 @@ document.getElementById('toggle-shortcuts-btn').addEventListener('click', () => 
     shortcutsPanel.classList.toggle('hidden');
 });
 
-// Set / Delete buttons on the folder rows of the Shortcuts panel
+// Set / Delete / Remove buttons on the folder rows of the Shortcuts panel,
+// and Add (new folder key on the next free digit 1-9)
 shortcutKeysEl.addEventListener('click', async (e) => {
+    if (!config) return;
+
+    const addBtn = e.target.closest('button.dest-add');
+    if (addBtn) {
+        addBtn.blur();
+        const keyChar = nextFreeDestKey();
+        if (!keyChar) return;
+        const folder = await ipcRenderer.invoke('select-folder');
+        if (!folder) return; // cancelled: nothing added
+        let id = keyChar;
+        for (let n = 4; config.destinationFolders[id]; n++) id = String(n); // id must be unused
+        config.destinationFolders[id] = {
+            name: folder.split(/[\\/]/).filter(Boolean).pop() || folder,
+            path: folder,
+            key: keyChar,
+            action: 'move'
+        };
+        await ipcRenderer.invoke('save-config', config);
+        updateShortcutDisplay();
+        return;
+    }
+
     const btn = e.target.closest('button[data-key]');
-    if (!btn || !config) return;
+    if (!btn) return;
     btn.blur();
     const dest = config.destinationFolders[btn.dataset.key];
     if (!dest) return;
+
+    if (btn.classList.contains('dest-remove')) {
+        if (PERMANENT_DEST_IDS.has(btn.dataset.key)) return;
+        delete config.destinationFolders[btn.dataset.key];
+        await ipcRenderer.invoke('save-config', config);
+        updateShortcutDisplay();
+        return;
+    }
 
     if (btn.classList.contains('dest-set')) {
         const folder = await ipcRenderer.invoke('select-folder');
